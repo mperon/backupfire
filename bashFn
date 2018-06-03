@@ -1,0 +1,293 @@
+#!/bin/bash
+#vim:syntax=bash:
+
+#default variables
+_DEBUG=$(echo "$*" | grep -qF -- "--debug" && echo "yes" || echo "")
+_LOG=${_LOG:-"/dev/null"}
+_LOG_DATE=${_LOG_DATE:-"+%y-%m-%d %H:%M:%S"}
+_LOG_SCRIPT=${_LOG_SCRIPT:-""}
+
+# creates a progress bar
+function ProgressBar {
+    # Process data
+    let _progress=(${1}*100/${2}*100)/100
+    let _done=(${_progress}*3)/10
+    let _left=30-$_done
+    # Build progressbar string lengths
+    _done=$(printf "%${_done}s")
+    _left=$(printf "%${_left}s")
+
+    # 1.2 Build progressbar strings and print the ProgressBar line
+    # 1.2.1 Output example:
+    # 1.2.1.1 Progress : [########################################] 100%
+    printf "\rProgress : [${_done// /\#}${_left// /-}] ${_progress}%% ${3} ${4} "
+}
+
+#functions
+function_exists() {
+    declare -f -F $1 > /dev/null 2>&1
+    return $?
+}
+
+command_exists() {
+    for cmd in "$@"; do
+        command -v $1 > /dev/null 2>&1
+        if [[ "${PIPESTATUS[0]}" -ne 0 ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+__print() {
+	__log "$@"
+	echo "$@"
+}
+
+__info() {
+    __print "[INFO] $@"
+}
+
+__warn() {
+    __print "[WARN] $@"
+}
+
+__error() {
+    __print "[ERROR] $@"
+}
+
+__debug() {
+	if [[ -n "$_DEBUG" ]]; then
+		__print "[DEBUG] $@"
+	fi
+}
+
+__logRun() {
+	__log "$@"
+    if [[ -n "$_DEBUG" ]]; then
+        eval $@ 2>&1 | tee "$_LOG"
+        return "${PIPESTATUS[0]}"
+    else
+        eval $@ >> "$_LOG" 2>&1
+        return "${PIPESTATUS[0]}"
+    fi
+}
+
+__log() {
+	local log= logt=
+	if [[ -n "$_LOG" ]] && [[ "$_LOG" != "/dev/null" ]]; then
+		if [[ -n "$_LOG_DATE" ]]; then
+			logt=$(date "$_LOG_DATE")
+			log="$log$logt "
+		fi
+		[[ -n "$_LOG_SCRIPT" ]] && log="$log[$_LOG_SCRIPT]"
+		echo "$log$@" | fold -w75 -s | sed '2~1s/^/    /' >> "$_LOG"
+	fi
+}
+
+__boolean_value() {
+    if [[ -z "$1" ]]; then return 1; fi
+    case "$1" in
+        TRUE|T|Y|S|y|s) return 0;;
+        FALSE|f|F|n|N) return 1;;
+        *) return 1;;
+    esac
+}
+
+__to_sep() {
+	myarr=( "$@" )
+	arrl=${#myarr[@]}
+	local sep=""
+	local res=""
+	for (( i=0; i<${arrl}; i++ )); do
+		afullname=$(realpath "${myarr[$i]}")
+		res="${res}${sep}${afullname}"
+		if [[ -z "$sep" ]]; then sep=","; fi
+	done
+	echo "$res"
+}
+
+#runs a function each file line by line
+#passes to function $line $filename
+__readfile() {
+	local rfl_c_file="$1"
+	local rfl_c_func="$2"
+	shift 2
+	while IFS='' read -r rfline || [[ -n "$rfline" ]]; do
+		function_exists "$rfl_c_func" && $rfl_c_func "$rfline" "$rfl_c_file" "$@"
+	done < "$rfl_c_file"
+}
+
+#runs a function each file line by line
+#passes to function $line $filename
+__ini_list() {
+    local config="$1"
+    local vars=$(cat "$config" \
+        | sed -e "s/^[[:space:]]\+//g" -e '/^ +$/d' -e '/^$/d' -e '/^[#;]/d' \
+        | sed  -rn "s/\[(.*)\]/\1/p" | tr '\n' ':' | sed -e 's/:$//')
+    echo $vars
+}
+
+#runs a function each file line by line
+#passes to function $line $filename
+__ini_section()  {
+    local config="$1" section="$2" name="$3"
+    local name=${name:-$section}
+    local vars=$(__ini_to_var $config $section)
+    declare -gA "$name=($vars)"
+}
+
+__ini_sections()  {
+    local config="$1" sections="$2" name="$3"
+    local secArray= sec= vars= secVar=
+    IFS=',' read -r -a secArray <<< "$sections"
+    for sec in ${secArray[@]}; do
+        secVar=$(__ini_to_var $config $sec)
+        vars="$vars $secVar"
+    done
+    local name=${name:-$sec}
+    declare -gA "$name=($vars)"
+}
+
+# Read one conf in all sections
+# __ini_all_sections $config "Conf"
+__ini_all_sections() {
+    local config="$1"
+    local _var="$2"
+    local _varSize=$((${#_var} + 1))
+    local section= vars= _dep=
+    while IFS='' read -r line || [[ -n "${line// }" ]]; do
+        if [[ "${line:0:1}" == "[" ]]; then
+            section=$line
+            continue
+        fi
+        if [[ "${line:0:$_varSize}" == "${_var}=" ]]; then
+            if [[ -n "$section" ]]; then
+                _dep="${line#*=}"
+                if [[ "${_dep:0:1}" != "\"" ]]; then _dep="\"$_dep\""; fi
+                vars="$vars ${section}=${_dep}"
+                section=
+            fi
+        fi
+    done < <(cat "$config" | sed -e "s/^[[:space:]]\+//g" \
+             | sed -nE "/^(\[|$_var)/p" )
+    echo "$vars"
+}
+
+__ini_to_var() {
+    local config="$1" section="$2"
+    local section=$(echo "$section" | sed -e 's/[]\/$*.^[]/\\&/g')
+    local vars=$(cat "$config" | sed -e "s/^[[:space:]]\+//g" \
+         | sed -nr "/^\[$section\]/ { :l /^[^#;].*/ p; n; /^\[/ q; b l; }" \
+         | grep "^[^\[]" | sed -e "s/^[^=]*/\[\0\]/" \
+         | sed -e "s/'/\"/g" -e "s/=/='/" -e "s/$/'/" \
+         | tr '\n' ' '
+    )
+    echo "$vars"
+}
+
+__is_subdir() {
+    local DIR_A="$2"
+    local DIR_B="$1"
+    DIR_A=${DIR_A/#\~/$HOME}
+    DIR_B=${DIR_B/#\~/$HOME}
+    if [[ -z "$3" ]]; then
+        DIR_A=$( readlink -f "$DIR_A" )
+        DIR_B=$(echo "$DIR_B" | sed -e "s|./|$PWD/|" -e "s|~/|$HOME|" )
+    fi
+    if [[ "${DIR_A:0:${#DIR_B}}" == "$DIR_B" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+__dir_in() {
+    local dir="$1"
+    local result=1
+    while IFS=',' read -ra FOLDERS; do
+        for F in "${FOLDERS[@]}"; do
+            if [[ "${dir:0:${#F}}" == "$F" ]]; then
+                result=0
+                break
+            fi
+        done
+    done <<< "$2"
+    unset FOLDERS F
+    return $result
+}
+
+__toCmdArray() {
+    local str="$1" char= char1= quote= strT=
+    declare -ag toCmdArray=()
+    str=$(echo "$str" | sed -Ee 's/["]+/"/g' -e "s/[']+/'/g")
+    local strL=${#str}
+    for (( i=0; i<$strL; i++ )); do
+        char="${str:$i:1}"
+        if [[ "$char" = '"' ]] || [[ "$char" = "'" ]]; then
+            if [[ "$char1" != '\' ]]; then
+                if [[ "$quote" == "$char" ]]; then
+                    quote=
+                else
+                    quote="$char"
+                fi
+                continue
+            fi
+        fi
+        #espaco e nao esta dentro de aspas
+        if [[ "$char" == " " ]] && [[ -z "$quote" ]]; then
+            if [[ -n "$strT" ]]; then
+#                strT=$(echo "$strT" | sed -e 's/[][" `~!@#$%^&*():;<>.,?/\|{}=+-]/\\&/g')
+                toCmdArray+=("$strT")
+            fi
+            strT=
+            continue
+        fi
+        strT="${strT}${char}"
+        char1="$char"
+    done
+    if [[ -n "$strT" ]]; then
+#        strT=$(echo "$strT" | sed -e 's/[][" `~!@#$%^&*():;<>.,?/\|{}=+-]/\\&/g')
+        toCmdArray+=("$strT")
+    fi
+    return 0
+}
+
+__humanToByte() {
+  for v in "${@}"; do
+    echo $v | awk \
+      'BEGIN{IGNORECASE = 1}
+       function pp(n,b,p) {printf "%u\n", n*b^p; next}
+       /[0-9]$/{print $1;next};
+       /K(iB)?$/{pp($1,  2, 10)};
+       /M(iB)?$/{pp($1,  2, 20)};
+       /G(iB)?$/{pp($1,  2, 30)};
+       /T(iB)?$/{pp($1,  2, 40)};
+       /KB$/{    pp($1, 10,  3)};
+       /MB$/{    pp($1, 10,  6)};
+       /GB$/{    pp($1, 10,  9)};
+       /TB$/{    pp($1, 10, 12)}'
+  done
+}
+
+__numberCompare() {
+    local A="$1" OP="$2" B="$3" ret=1
+    case "$OP" in
+        ">")
+            [[ "$A" -gt "$B" ]] && ret=0;;
+        ">=")
+            [[ "$A" -ge "$B" ]] && ret=0;;
+        "="|"==")
+            [[ "$A" -eq "$B" ]] && ret=0;;
+        "<")
+            [[ "$A" -lt "$B" ]] && ret=0;;
+        "<=")
+            [[ "$A" -le "$B" ]] && ret=0;;
+        "!=")
+            [[ "$A" -ne "$B" ]] && ret=0;;
+    esac
+    return $ret
+}
+
+
+

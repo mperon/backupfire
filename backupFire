@@ -1,0 +1,658 @@
+#!/bin/bash
+# vim: ts=4 sw=4 et ft=sh
+
+# import functions
+source "${BASH_SOURCE%/*}/bashFn"
+
+INVALID_DIR="/root/,/etc/,/bin/,/boot/,/dev/,/lib/,/lib32/,/lib64/,/libx32/,/proc/"
+DATA=$(date +%d/%m/%Y)
+DEFAULT_CMD="/usr/bin/rsync"
+DEFAULT_CMD_R="/usr/bin/rclone"
+
+_LOG="/dev/null"
+#_LOG_SCRIPT="serverBackup.sh"
+
+BUSER=$(whoami)
+if [[ "$SUDO_USER" != "" && "$USER" = "root" ]]; then
+    BUSER="$SUDO_USER"
+else
+    BUSER="$USER"
+fi
+
+a_all= a_email= a_actions= a_config= a_dry=
+
+a_config_folders=("$HOME/.config/backupfire" "/etc/backupfire")
+a_config_default="default.conf"
+
+########################################
+#                                      #
+#           Main Function              #
+#                                      #
+########################################
+__main() {
+    #declaring dependencies
+    # load dependencies to var name depends
+    __loadDependencies "depends"
+    #default variables
+    walkList=":"
+    runList=":"
+    errList=":"
+    if [[ -n "$a_all" ]]; then
+        #list all sections
+        local actionsStr=$(__ini_list $a_config)
+        IFS=':' read -r -a a_actions <<< "$actionsStr"
+    fi
+    __info "Actions To Execute: ${a_actions[@]}"
+    if [[ ! "${#a_actions[@]}" -eq 0 ]]; then
+        local action=
+        for action in "${a_actions[@]}"; do
+            __run "$action"
+        done
+    else
+        __error "You must inform at least one action!"
+        __usage
+    fi
+}
+
+#Deals with circular references and depencencies
+__run() {
+    local action=$1
+    if [[ "$action" == "General" ]]; then return 0; fi
+    if [[ ! "$action" =~ ^[0-9A-Za-z_-]+$ ]]; then
+        __error "Action: $action name contain invalid chars."
+        __error "Action Name must only use numbers and letters."
+        errList="$errList:$action:"
+        walkList="$walList:$action:"
+        return 1
+    fi
+    if [[ "$runList" == *":$action:"* ]]; then
+        return 0
+    fi
+    #check dependencies
+    local ok=0
+    if [[ -n "${depends[$action]// }" ]]; then
+        __debug "Action $action has depencencies.."
+        #action has depencencies, check if already run or try to run
+        while IFS=',' read -ra deps; do
+            for dep in "${deps[@]}"; do
+                dep=$(echo "$dep" | xargs) #trim
+                if [[ "$errList" == *":$dep:"* ]]; then
+                    #nao pode rodar depende de uma falha
+                    __error "Action $action requires $dep, but $dep failed!"
+                    walkList="${walkList}${dep}:"
+                    errList="${errList}${dep}:"
+                    return 1
+                elif [[ "$runList" == *":$dep:"* ]]; then
+                    continue
+                elif [[ "$walkList" == *":$dep:"* ]]; then
+                    __error "Action $action requires $dep, but $dep has circular dependencie with $action!"
+                    #ja passou pela dependencia, referencia circular
+                    return 1
+                else
+                    #tenta rodar a depencencia
+                    walkList="${walkList}${action}:"
+                    __run "$dep"
+                    ok=$?
+                fi
+            done
+        done <<< "${depends[$action]}"
+    fi
+    if [[ "$ok" -eq 0 ]]; then
+        if [[ "$runList" == *":$action:"* ]]; then
+            return 0
+        fi
+        __info "Running action: $action .."
+        __run_action "$action"
+        if [[ "$?" -eq 0 ]]; then
+            runList="${runList}${action}:"
+        else
+            errList="${errList}${action}:"
+        fi
+    fi
+    if [[ ! "$walkList" == *":$action:"* ]]; then
+        walkList="${walkList}${action}:"
+    fi
+}
+
+# action
+__run_action() {
+    unset cfg
+    local action=$1
+    __ini_sections "$a_config" "General,${action}" "cfg"
+    cfg[Name]="$1"
+    __normalizeCfgPaths "To:From:IncludeFrom:ExcludeFrom:FilterFrom"
+
+    __debug "Running Action: [$action]"
+    __debug "Description: ${cfg[Description]} .."
+    __debug "--------------------------------------"
+
+    #check all variables
+    if [[ "${#cfg[@]}" -eq 0 ]]; then
+        __print "Action $action doesnt exist in config file.."
+        return 1
+    fi
+    #origem tem que existir
+    if [[ -z "${cfg[From]// }" ]] && [[ ! -d "${cfg[From]}" ]]; then
+        __error "[$action]: Backup origin $from doesnt exists!"
+        return 1
+    fi
+    #destino tem que ser diferente de nulo e não pode ser igual a orign
+    if [[ -z "${cfg[To]// }" ]] && [[ "${cfg[From]}" == "${cfg[To]}" ]]; then
+        __error "[$action]: Destination doesnt exists or is same folder than origin!"
+        return 1
+    fi
+
+    #check if its remote
+    IFS=':' read -ra toParts <<< "${cfg[To]}"
+    if [[ -z "${toParts[1]}" ]]; then
+        cfg[ToHost]=""
+        cfg[ToPath]="${toParts[0]}"
+        cfg[Type]="${cfg[Type]:-Local}"
+    else
+        #is remote
+        cfg[ToHost]="${toParts[0]}"
+        cfg[ToPath]="${toParts[1]}"
+        cfg[Type]="${cfg[Type]:-Remote}"
+    fi
+
+    #is not remote
+    if [[ -z "${cfg[ToHost]}" ]]; then
+        #destination cannot be subdirectory of origin
+        if __is_subdir "${cfg[To]}" "${cfg[From]}"; then
+            __error "[$action]: Destination dir is subdir of Origin"
+            __error "[$action]: Origin: ${cfg[From]}"
+            __error "[$action]: Destination: ${cfg[To]}"
+            return 1
+        fi
+        #destination cannot be /etc, /boot, etc...
+        if __dir_in "${cfg[To]}" "$INVALID_DIR"; then
+            __error "[$action]: Destination dir is subdir of invalid dirs"
+            __error "[$action]: Destination: ${cfg[To]}"
+            __error "[$action]: Invalid List: ${INVALID_DIR}"
+            return 1
+        fi
+    fi
+    #runs local or remote sync
+    if ! function_exists "__type${cfg[Type]}"; then
+        __error "Type ${cfg[Type]} doesnt exist!"
+        return 1
+    fi
+    __runBeforeAfter "Before"
+    if [[ "$?" -ne 0 ]]; then
+        __error "Failed to run Before command in action config..."
+        return 1
+    fi
+    __debug "Calling Type: ${cfg[Type]}:"
+    __type${cfg[Type]}
+    ret=$?
+    if [[ "$ret" -ne 0 ]]; then
+        return $ret
+    fi
+    __runBeforeAfter "After"
+    if [[ "$?" -ne 0 ]]; then
+        __error "Failed to run After command in action config..."
+        return 1
+    fi
+    return 0
+}
+
+########################################
+#                                      #
+#    Actions Types Implementations     #
+#                                      #
+########################################
+__typeLocal() {
+    unset cmd
+    declare -g cmd
+    local default= options= excludes=
+    if __boolean_value "${cfg[Super]}"; then
+        cmd="sudo"
+    fi
+    #command
+    cmd="$cmd $DEFAULT_CMD"
+
+    #Options
+    default="-Cravzp"
+    options="${cfg[Options]:-$default}"
+    cmd="$cmd $options"
+
+    __defaultArguments
+    local ret=$?
+    if [[ "$ret" -ne 0 ]]; then
+        return "$ret"
+    fi
+
+    #add from and to
+    cmd="$cmd ${cfg[From]} ${cfg[To]}"
+    if [[ -n "$a_dry" ]]; then
+        __info "$cmd"
+        ret=$?
+    else
+        __debug "Running: $cmd"
+        __logRun $cmd
+        ret=$?
+    fi
+    if [[ "$ret" -ne 0 ]]; then
+        __error "Error ocurred running type [Local] with return $ret !"
+        return "$ret"
+    fi
+}
+
+__typeRemote() {
+    unset cmd
+    declare -g cmd
+    local default= options= excludes=
+    if __boolean_value "${cfg[Super]}"; then
+        cmd="sudo"
+    fi
+    #command
+    cmd="$cmd $DEFAULT_CMD_R"
+
+    #Action
+    default="sync"
+    options="${cfg[Action]:-$default}"
+    cmd="$cmd $options"
+
+    #Options
+    default=""
+    options="${cfg[Options]:-$default}"
+    cmd="$cmd $options"
+
+    __defaultArguments
+    local ret=$?
+    if [[ "$ret" -ne 0 ]]; then
+        return "$ret"
+    fi
+    #add from and to
+    cmd="$cmd ${cfg[From]} ${cfg[To]}"
+    if [[ -n "$a_dry" ]]; then
+        __info "$cmd"
+        ret=$?
+    else
+        __debug "Running: $cmd"
+        __logRun $cmd
+        ret=$?
+    fi
+}
+
+__defaultArguments() {
+    local options=
+    local auto_f= auto_ie= af_prefix=
+    #AutoFilter => Search in From path for file with filters
+    if __boolean_value "${cfg[AutoFilter]// }"; then
+        __debug "AutoFilter Enabled: Try to find files .."
+
+        if [[ -n "${cfg[AutoFilterPrefix]// }" ]]; then af_prefix="${cfg[AutoFilterPrefix]}."; fi
+
+        if [[ -f "${cfg[From]}/.${afp}filters.conf" ]]; then
+            cmd="$cmd --filter-from='${cfg[From]}/.${afp}filters.conf'"
+            auto_f=y
+        fi
+        if [[ -f "${cfg[From]}/.${afp}includes.conf" ]]; then
+            cmd="$cmd --include-from='${cfg[From]}/.${afp}includes.conf'"
+            auto_ie=y
+        fi
+        if [[ -f "${cfg[From]}/.${afp}excludes.conf" ]]; then
+            cmd="$cmd --exclude-from='${cfg[From]}/.${afp}excludes.conf'"
+            auto_ie=y
+        fi
+    fi
+    #filter-from
+    if [[ -n "${cfg[FilterFrom]// }" ]]; then
+        if [[ -n "$auto_f" ]]; then
+            __debug "AutoFilter is ON. Ignoring FilterFrom: ${cfg[FilterFrom]}"
+        else
+            options=""
+            if [[ -n "${cfg[FilterFrom]// }" ]] && [[ ! -f "${cfg[FilterFrom]}" ]]; then
+                __error "FilterFrom doesnt exist: ${cfg[FilterFrom]}. Skipping!"
+                return 1
+            else
+                options="$options --filter-from='${cfg[FilterFrom]}'"
+            fi
+            cmd="$cmd $options"
+        fi
+    fi
+    #include-from or exclude-from
+    if [[ -n "${cfg[IncludeFrom]// }" ]] || [[ -n "${cfg[ExcludeFrom]// }" ]]; then
+        if [[ -n "$auto_ie" ]]; then
+            __debug "AutoFilter is ON. Ignoring IncludeFrom and ExcludeFrom"
+        else
+            options=""
+            if [[ -n "${cfg[IncludeFrom]// }" ]]; then
+                if [[ -f "${cfg[IncludeFrom]}" ]]; then
+                    options="$options --include-from='${cfg[IncludeFrom]}'"
+                else
+                    __error "IncludeFrom doesnt exist: ${cfg[IncludeFrom]}. Skipping!"
+                    return 1
+                fi
+            fi
+            if [[ -n "${cfg[ExcludeFrom]// }" ]]; then
+                if [[ -f "${cfg[ExcludeFrom]}" ]]; then
+                    options="$options --exclude-from='${cfg[ExcludeFrom]}'"
+                else
+                    __error "ExcludeFrom doesnt exist: ${cfg[ExcludeFrom]}. Skipping!"
+                    return 1
+                fi
+            fi
+            cmd="$cmd $options"
+        fi
+    fi
+    #Excludes and excludes
+    if [[ -n "${cfg[Excludes]// }" ]]; then
+        options=$(__buildBasicArgument "${cfg[Excludes]}" "--exclude " "")
+        cmd="$cmd $options"
+    fi
+    if [[ -n "${cfg[Includes]// }" ]]; then
+        options=$(__buildBasicArgument "${cfg[Includes]}" "--include " "")
+        cmd="$cmd $options"
+    fi
+}
+
+########################################
+#                                      #
+#      Run Before and After            #
+#                                      #
+########################################
+__runBeforeAfter() {
+    local time=$1 #After or Before
+    local actionStr=
+    if [[ -n "${cfg[$time]// }" ]]; then
+        if [[ "${cfg[$time]:0:1}" == "_" ]]; then
+            __error "Action time cannot execute private functions: ${cfg[$time]} !"
+            return 1
+        fi
+        #replace with home and ./ From
+        cfg[$time]="${cfg[$time]/#\~\//$HOME\/}"
+        cfg[$time]="${cfg[$time]/#\.\//$cfg[From]\/}"
+
+        #replace all variables in str
+        local _key=
+        for _key in "${!cfg[@]}"; do
+            local keyS="\%${_key}\%" valS="${cfg[$_key]}"
+            cfg[$time]="${cfg[$time]/$keyS/$valS}"
+        done
+
+        __debug "Running $time action $action: "
+        __toCmdArray "${cfg[$time]}"
+
+        #parses bash variables
+        for (( i=0; i<${#toCmdArray[@]}; i++ )); do
+            toCmdArray[$i]=$(bash -c "echo \"${toCmdArray[$i]}\"")
+        done
+        __debug "Command: ${toCmdArray[0]}"
+        __debug "Arguments: ${toCmdArray[@]:1}"
+
+        if [[ -f "${toCmdArray[0]}" ]];  then
+            if [[ ! -x "${toCmdArray[0]}" ]]; then
+                __error "Command to run $time Action ${cfg[Name]} has no execute permission!"
+                return 1
+            fi
+        else
+            #is not a file, try internal commands
+            if function_exists "__abRun_${toCmdArray[0]}"; then
+                toCmdArray[0]="__abRun_${toCmdArray[0]}"
+            else
+                __error "Command to run $time Action ${cfg[Name]} dont exists!"
+                return 1
+            fi
+        fi
+        if [[ -n "$_DEBUG" ]]; then
+            From="${cfg[From]}" To="${cfg[To]}" Name="${cfg[Name]}" \
+            Type="${cfg[Type]}" Moment="$time" \
+            "${toCmdArray[@]}" 2>&1 | tee "$_LOG"
+            ret="${PIPESTATUS[0]}"
+        else
+            From="${cfg[From]}" To="${cfg[To]}" Name="${cfg[Name]}" \
+            Type="${cfg[Type]}" Moment="$time" \
+            "${toCmdArray[@]}" >> "$_LOG" 2>&1
+            ret="${PIPESTATUS[0]}"
+        fi
+        unset From To Name Type Moment
+        return "$ret"
+    fi
+    return 0
+}
+
+########################################
+#      Internal Run Before/After       #
+#      Internal Commands to Use        #
+########################################
+
+#first parameter is directory
+#second is operator
+#third is size
+__abRun_checkSize() {
+    local folder="$1" oper="$2" size="$3"
+    local sizeBytes= fSize= ret=
+
+    if [[ -z  "${folder// }" ]] || [[ ! -d  "$folder" ]]; then
+        __error "[${cfg[Name]}] checkSize: Folder [$folder] doesnt exists!"
+        return 1
+    fi
+    if [[ -z  "$oper" ]]; then
+        __error "[${cfg[Name]}] checkSize: Operator cannot be empty!"
+        return 1
+    fi
+    if [[ -n  "$size" ]]; then
+        sizeBytes=$(__humanToByte "$size")
+    fi
+    if [[ -z  "${sizeBytes// }" ]]; then
+        __error "[${cfg[Name]}] checkSize: Invalid size: $size !"
+        return 1
+    fi
+    if command_exists du cut; then
+        fSize=$(du -B1 -s "$folder" | cut -f1)
+        fSize="${fSize// }"
+        __numberCompare "$fSize" "$oper" "$sizeBytes"
+        return $?
+    else
+        __error "[${cfg[Name]}] checkSize: Command [du] is not installed !"
+        return 1
+    fi
+}
+
+__abRun_countFiles() {
+    local folder="$1" oper="$2" count="$3"
+    local countFiles= ret=
+    if [[ -z  "${folder// }" ]] || [[ ! -d  "$folder" ]]; then
+        __error "[${cfg[Name]}] countFiles: Folder [$folder] doesnt exists!"
+        return 1
+    fi
+    if [[ -z  "$oper" ]]; then
+        __error "[${cfg[Name]}] countFiles: Operator cannot be empty!"
+        return 1
+    fi
+    count=$(echo "$count" | sed 's/[^0-9\.-]//g')
+    if [[ -z  "${count// }" ]]; then
+        __error "[${cfg[Name]}] countFiles: Invalid count: $count !"
+        return 1
+    fi
+    if command_exists find wc; then
+       countFiles=$(find "${folder}" 2>/dev/null | wc -l)
+        __numberCompare "$countFiles" "$oper" "$count"
+        return $?
+    else
+        __error "[${cfg[Name]}] countFiles: Command [find] or [wc] is not installed !"
+        return 1
+    fi
+}
+
+########################################
+#                                      #
+#      Generic Functions               #
+#                                      #
+########################################
+__loadDependencies() {
+    local name="${1:-depends}"
+    local _deps=$(__ini_all_sections "$a_config" "Depends")
+    declare -gA "${name}=($_deps)"
+}
+
+__normalizeCfgPaths() {
+    local args="$1"
+    local blacklist="To:From:"
+    IFS=':' read -ra igArr <<< "${args}"
+    for i in "${igArr[@]}"; do
+        if [[ -n "${cfg[$i]}" ]]; then
+            cfg[$i]="${cfg[$i]/#\~\//$HOME\/}"
+            if [[ ! "$blacklist" == *"$i:"* ]]; then
+                #nao é From nem To, substitui o ./
+                cfg[$i]="${cfg[$i]/#\.\//$cfg[From]\/}"
+            fi
+        fi
+    done
+}
+
+__buildArgument() {
+    local args="$1"
+    local act="$2"
+    local igArr=
+    local arg=
+    local argList=
+    IFS=':' read -ra igArr <<< "${args}"
+    for i in "${igArr[@]}"; do
+        arg=$($act "$i")
+        argList="${argList} ${arg}"
+    done
+    echo "$argList"
+}
+
+__buildBasicArgument() {
+    local args="$1"
+    local prefix="$2"
+    local suffix="$3"
+    local igArr=
+    local arg=
+    local argList=
+    IFS=',' read -ra igArr <<< "${args}"
+    for i in "${igArr[@]}"; do
+        local p=$((${#i}-1))
+        arg=$(echo "$i" | sed "s/['\"]//g")
+        arg="${prefix}\"${i}\"${suffix}"
+        argList="${argList} ${arg}"
+    done
+    echo "$argList"
+}
+
+########################################
+#                                      #
+#      Command Line Arguments Parser   #
+#                                      #
+########################################
+__parse() {
+    getopt --test > /dev/null
+    if [[ $? -ne 4 ]]; then
+        __print "I’m sorry, `getopt --test` failed in this environment."
+        exit 1
+    fi
+
+    local OPTIONS=ae:c:l:hdt
+    local LONGOPTIONS=all,email:,config:,log:,help,debug,dry-run
+
+    # -temporarily store output to be able to check for errors
+    # -e.g. use “--options” parameter by name to activate quoting/enhanced mode
+    # -pass arguments only via   -- "$@"   to separate them correctly
+    __debug getopt --options=$OPTIONS --longoptions=$LONGOPTIONS --name "$0" -- "$@"
+
+    local PARSED=$(getopt --options=$OPTIONS --longoptions=$LONGOPTIONS --name "$0" -- "$@")
+    if [[ $? -ne 0 ]]; then
+        # e.g. $? == 1
+        #  then getopt has complained about wrong arguments to stdout
+        exit 2
+    fi
+    # read getopt’s output this way to handle the quoting right:
+    eval set -- "$PARSED"
+    __debug "Parsed Getopts:" "$@"
+    # now enjoy the options in order and nicely split until we see --
+    while true; do
+        case "$1" in
+            -a|--all)
+                a_all="y"; shift;;
+            -e|--email)
+                a_email="$2"; shift 2;;
+            -c|--config)
+                a_config="$2"; shift 2;;
+            -l|--log)
+                _LOG="$2"; shift 2;;
+            -t|--dry-run)
+                a_dry="y"; shift;;
+            -d|--debug)
+                _DEBUG=y; shift;;
+            --)
+                shift; a_actions=( "$@" ); break;;
+            h  ) __usage;;
+            \? ) __error "Unknown option: -$OPTARG" >&2; __usage;;
+            :  ) __error "Missing option argument for -$OPTARG" >&2; __usage;;
+            *  ) __error "Unimplemented option: -$OPTARG" >&2; __usage;;
+        esac
+    done
+    # validate input parameters
+    if [[ "${#a_actions[@]}" -eq 0 ]] && [[ -z "$a_all" ]]; then
+        __error "You must provide an action or --all to all actions avaliable"
+        __usage
+    fi
+
+    #deals with config search
+    __configPathAnalyze
+}
+
+__configPathAnalyze() {
+    if [[ ! -d "$HOME/.config/backupfire/" ]]; then
+        mkdir -p "$HOME/.config/backupfire/"
+    fi
+    if [[ -z "$a_config" ]]; then
+        a_config="$HOME/.config/backupfire/${a_config_default}"
+        if [[ ! -f "$a_config" ]]; then
+            a_config="/etc/backupfire/${a_config_default}"
+        fi
+    else
+        #file is set, check if exists
+        #if oly filename try to find it on paths
+        if [[ "${a_config##/*/}" == "${a_config}" ]]; then
+            local cfg_f=
+            for cfg_f in ${a_config_folders[@]}; do
+                if [[ -f "${cfg_f}/${a_config}" ]] && [[ -r "${cfg_f}/${a_config}" ]]; then
+                    a_config="${cfg_f}/${a_config}"
+                    break
+                fi
+            done
+        fi
+    fi
+    if [[ ! -f "${a_config}" ]] || [[ ! -r "${a_config}" ]]; then
+        __error "Default config file not found!" \
+        "You must set it in [/etc/backupfire/${a_config_default}]" \
+        "Or in [~/.config/backupfire/${a_config_default}]" \
+        "OR you must set the file using -c configfile "
+        __usage
+    fi
+}
+
+__usage() {
+    cat <<HELP_USAGE
+    $0
+        [-a] [-c config] [-e email@] action [action1] ...
+
+    -a|--all            Run all backups
+    -c|--config [file]  Specify config file (default ~/.config/backupfire/default.conf)
+    -t|--dry-run        Only show what is gonna happen, dont make the backup
+    -e|--email          Send e-mail to address every run
+    -d|--debug          Show Debug information
+    -h|--help           Show help
+HELP_USAGE
+    exit 4
+}
+
+if [[ -n "$_DEBUG" ]]; then __print "Parsing command line arguments.."; fi
+
+__parse "$@"
+
+__debug "Command Line Arguments: "
+__debug "       a_all:  $a_all"
+__debug "    a_config:  $a_config"
+__debug "     a_email:  $a_email"
+__debug "   a_actions:  ${a_actions[@]}"
+__debug "      _DEBUG:  $_DEBUG"
+__debug ""
+__debug "Running main code: "
+__main "$@"
+exit $?
