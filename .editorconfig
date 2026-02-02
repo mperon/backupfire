@@ -1,0 +1,202 @@
+# EditorConfig helps developers define and maintain consistent
+# coding styles between different editors and IDEs
+# editorconfig.org
+
+root = true
+
+[*.{yml,yaml}]
+# YAML files typically use 2 spaces for indentation
+indent_style = space
+indent_size = 2
+
+[*.yaml]
+# Also cover .yaml extension
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Tab indentation (no size specified)
+[Makefile]
+indent_style = tab
+
+
+
+# EditorConfig helps maintain consistent coding styles across editors and IDEs.
+# Spec: https://editorconfig.org
+root = true
+
+###############################################################################
+# Global defaults (applies to most text files)
+###############################################################################
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+indent_style = space
+indent_size = 2
+tab_width = 2
+
+# --- Optional (non-standard; supported by some IDEs/plugins) -----------------
+# max_line_length = 120
+
+###############################################################################
+# Keep trailing whitespace in Markdown (it can be meaningful for hard line-breaks)
+###############################################################################
+[*.md]
+trim_trailing_whitespace = false
+# Optional non-standard:
+# max_line_length = off
+
+###############################################################################
+# Whitespace-sensitive formats
+###############################################################################
+[*.{diff,patch}]
+trim_trailing_whitespace = false
+
+###############################################################################
+# YAML
+###############################################################################
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# JSON / JSONC (2 spaces is the most common default across tools)
+###############################################################################
+[*.{json,jsonc}]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# TOML / INI-style configs
+###############################################################################
+[*.{toml,ini,cfg,conf,properties}]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# Shell scripts
+###############################################################################
+[*.sh]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# Windows scripts (commonly CRLF)
+###############################################################################
+[*.{bat,cmd}]
+end_of_line = crlf
+
+[*.ps1]
+end_of_line = crlf
+
+###############################################################################
+# Python (PEP 8 default indentation)
+###############################################################################
+[*.{py,pyi}]
+indent_style = space
+indent_size = 4
+# Optional non-standard (Black uses 88 by default):
+# max_line_length = 88
+
+###############################################################################
+# Go (gofmt uses tabs for indentation)
+###############################################################################
+[*.go]
+indent_style = tab
+tab_width = 8
+
+###############################################################################
+# Makefiles REQUIRE tabs
+###############################################################################
+[Makefile]
+indent_style = tab
+tab_width = 8
+
+###############################################################################
+# C / C++ (commonly 4 spaces)
+###############################################################################
+[*.{c,cc,cpp,cxx,h,hh,hpp,hxx}]
+indent_style = space
+indent_size = 4
+
+###############################################################################
+# Java / Kotlin / C# (commonly 4 spaces)
+###############################################################################
+[*.{java,kt,kts,cs}]
+indent_style = space
+indent_size = 4
+
+###############################################################################
+# Ruby / PHP (commonly 2 spaces)
+###############################################################################
+[*.{rb,php}]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# Rust (commonly 4 spaces; rustfmt formats anyway)
+###############################################################################
+[*.rs]
+indent_style = space
+indent_size = 4
+
+###############################################################################
+# Web: HTML/CSS/JS/TS (commonly 2 spaces; prettier defaults)
+###############################################################################
+[*.{html,j2,html}]
+end_of_line = lf
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+insert_final_newline = true
+[*.{css,scss,less}]
+end_of_line = lf
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{js,mjs,cjs,jsx,ts,tsx}]
+end_of_line = lf
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+###############################################################################
+# XML / SVG (commonly 2 spaces)
+###############################################################################
+[*.{xml,svg}]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# SQL (varies; 2 spaces is a safe default)
+###############################################################################
+[*.sql]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# Docker / Compose
+###############################################################################
+[Dockerfile]
+indent_style = space
+indent_size = 2
+
+[docker-compose*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+###############################################################################
+# Binary-ish files (EditorConfig isn't meant for binaries, but these prevent
+# some editors from trying to "fix whitespace/newlines" if they do apply)
+###############################################################################
+[*.{png,jpg,jpeg,gif,webp,ico,pdf,zip,jar,war,exe,dll}]
+insert_final_newline = false
+trim_trailing_whitespace = false

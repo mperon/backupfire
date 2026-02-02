@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  pgbackup:
+    build: .
+    container_name: pgbackup
+    environment:
+      DB_HOST: "db"
+      DB_NAME: "postgres"
+      DB_USER: "postgres"
+      DB_PASSWORD: "postgres"
+      BK_DEST: "/app/data"
+      BK_CONFIG_DIR: "/app/config"
+      BK_PUBKEY_LOC: "/app/config/.pubkey.pem"
+      BK_RCLONE_CONF: "/app/config/.rclone.conf"
+      BK_CRON: "0 2 * * *"
+      # Optional: pass args to pgbackup, e.g. "-P" for plain backups
+      # BK_ARGS: "-P"
+    volumes:
+      - ./backups:/app/data
+      - ./config:/app/config:ro
+    # Optional: if pgbackup needs to wait for a local db container
+    # depends_on:
+    #   - db

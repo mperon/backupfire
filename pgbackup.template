@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# pgbackup wrapper template
+# - This file is a model for the generated /app/pgbackup wrapper.
+# - The entrypoint writes a concrete version at container start.
+# - It injects BK_* and DB_* env vars and then drops privileges.
+# - Do not edit the generated /app/pgbackup directly.
+
+set -Eeuo pipefail
+export HOME="/home/backup"
+
+# Exported variables are injected here by the entrypoint.
+# Example:
+# export DB_HOST='db'
+# export BK_DEST='/app/data'
+
+# Exported variables are injected here by the entrypoint.
+exec su-exec backup:backup /app/internal-pgbackup.sh "$@"

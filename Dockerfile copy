@@ -1,0 +1,36 @@
+# Alpine-based image to run backupfire.sh via cron
+FROM alpine:latest
+
+# Install runtime deps:
+# - bash: required by backupfire.sh
+# - rsync: Local + CopyFiles
+# - rclone: Remote + Vault remote destination
+# - openssl: Vault encryption
+# - tzdata: correct cron timezone (optional)
+# - ca-certificates: rclone TLS
+# - coreutils: provides a few GNU-ish utilities (nice to have)
+# - zip: optional (Vault Compress=zip)
+RUN apk add --no-cache \
+    bash \
+    rsync \
+    rclone \
+    openssl \
+    tzdata \
+    ca-certificates \
+    coreutils \
+    zip
+
+# App directories
+RUN mkdir -p /etc/backupfire /var/log/backupfire
+
+# Copy scripts
+COPY backupfire.sh backupfire_lib.sh docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/backupfire.sh /usr/local/bin/backupfire_lib.sh /usr/local/bin/docker-entrypoint.sh
+
+# Defaults (can be overridden at runtime)
+ENV BACKUPFIRE_CONFIG=/etc/backupfire/default.conf
+ENV CRON_SCHEDULE="0 3 * * *"
+ENV CRON_ARGS="-a -c /etc/backupfire/default.conf"
+ENV CRON_LOG_FILE=/var/log/backupfire/cron.log
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
