@@ -25,4 +25,13 @@ echo "$BK_FILE"
 source "${SCRIPT_DIR}/backupfire_lib.sh"
 
 
-fn_human_to_bytes "1mb"
+declare -A cfg;
+
+fn_ini_load_sections cfg ./config/new.conf "General,VirtualMachines"
+
+
+fn_debug_array "cfg"
+declare -a cmdArray
+fn_cmdline_to_array "cmdArray" "-Cravzp"
+
+declare -p cmdArray

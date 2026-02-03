@@ -240,11 +240,17 @@ fn_dir_in() {
 # ---------------------------
 
 # fn_cmdline_to_array: split a command line string into an array, honoring simple quotes.
-# Usage: fn_cmdline_to_array "echo 'hello world'"; echo "${toCmdArray[@]}"
-# Output array name: toCmdArray (global).
+# Usage:
+#   local -a cmd
+#   fn_cmdline_to_array cmd "echo 'hello world'"
+#   printf '%q\n' "${cmd[@]}"
 fn_cmdline_to_array() {
-  local str="$1" i char prev quote="" token=""
-  declare -ag toCmdArray=()
+  local out_name="${1:-}" str="${2:-}"
+  [[ $out_name =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+    || { printf 'fn_cmdline_to_array: bad out var name: %q\n' "$out_name" >&2; return 2; }
+
+  local -n toCmdArray="$out_name"   # <- writes into caller's array
+  toCmdArray=()
 
   # Normalize consecutive quotes.
   str="$(printf '%s' "$str" | sed -Ee 's/[\"]+/"/g' -e "s/[']+/'/g")"
@@ -278,7 +284,6 @@ fn_cmdline_to_array() {
   done
 
   [[ -n "$token" ]] && toCmdArray+=("$token")
-  return 0
 }
 
 # ---------------------------
@@ -525,4 +530,35 @@ fn_debug_array() {
       printf '%s[%s]=%q\n' "$name" "$k" "${a[$k]}"
     done
   fi
+}
+
+# ---------------------------
+# Actions utilities
+# ---------------------------
+# fn_parse_uri_scheme: parse "scheme://user[:pass]@host[:port]/db" into an assoc array.
+# Usage: declare -A conn; fn_parse_uri_scheme "conn" "postgres://marcos@server/api"; echo ${conn[Host]};
+# Sets keys (empty if missing): Scheme User Pass Host Port Database
+fn_parse_uri_scheme() {
+  local out="$1" uri="$2" rest auth hostport path
+  [[ $out =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 2
+  local -n m="$out"; m=([Scheme]= [User]= [Pass]= [Host]= [Port]= [Name]=)
+
+  m[Scheme]="${uri%%://*}"; rest="${uri#*://}"
+
+  # split path (/db...) if present
+  hostport="$rest"; path=""
+  [[ "$rest" == */* ]] && { hostport="${rest%%/*}"; path="${rest#*/}"; }
+
+  # split auth@hostport if present
+  if [[ "$hostport" == *@* ]]; then
+    auth="${hostport%%@*}"; hostport="${hostport#*@}"
+    m[User]="${auth%%:*}"; [[ "$auth" == *:* ]] && m[Pass]="${auth#*:}"
+  fi
+
+  # host[:port]
+  m[Host]="${hostport%%:*}"
+  [[ "$hostport" == *:* ]] && m[Port]="${hostport#*:}"
+
+  # db/path (keep first segment as db)
+  [[ -n "$path" ]] && m[Name]="${path%%\?*}"
 }

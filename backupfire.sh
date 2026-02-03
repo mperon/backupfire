@@ -37,6 +37,8 @@ RSYNC_CMD="${RSYNC_CMD:-rsync}"
 RCLONE_CMD="${RCLONE_CMD:-rclone}"
 OPENSSL_CMD="${OPENSSL_CMD:-openssl}"
 RCLONE_CONFIG="${RCLONE_CONFIG:-}"
+POSTGRES_CMD="${POSTGRES_CMD:-pgdump}"
+POSTGRES_CHECK_CMD="${POSTGRES_CHECK_CMD:-psql}"
 
 
 # Options variables
@@ -58,19 +60,6 @@ declare -A RUN_SET=() WALK_SET=() ERR_SET=()
 # Task config is loaded into this associative array before each run.
 declare -A cfg=()
 TASK= #current task
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # ---------------------------
 # Task runner
@@ -268,6 +257,14 @@ bk_type_backup() {
     return "$ret"
   fi
 
+  #check if To is a temporary directory:
+  if [[ "${cfg[To]}" == tmp:* ]]; then
+    cfg[OriginalTo]="${cfg[To]}"
+    cfg[To]="$(bk_mktemp -d -t "backupfire.${task}.to")"
+    fn_debug "Using a temporary dest! It will be deleted at end of the execution:"
+    fn_debug "${cfg[To]}"
+  fi
+
   # action was executed, now compression
   if ! bk_type_backup_compression "$task" "$w_dir" "$a_dir"; then
     return 1
@@ -289,16 +286,116 @@ bk_type_backup() {
   fi
 }
 
+bk_action_postgres_check() {
+  local needed=("Host" "Name") n=
+
+  #verify if was alreasy checked
+  (("${cfg[DbChecked]:-0}")) && return 0
+
+  # parse url:
+  declare -A conn;
+  if [[ -n "${cfg[From]:-}" ]] && [[ "${cfg[From]}" == *"://"* ]]; then
+    fn_parse_uri_scheme conn "${cfg[From]}"
+    [[ -n "${conn[Host]}" && -n "${conn[Name]:-}" ]] \
+      || {
+        fn_error "Invalid connection string: format should be: scheme://user[:pass]@host[:port]/db_name";
+        fn_error "It was: ${cfg[From]}. Change Task From= value to adjust."
+        return 1
+      }
+      # sets in the main function
+      for k in "${!conn[@]}"; do
+        cfg[Db${k}]="${conn[$k]}"
+      done
+  fi
+
+  # check database variables again
+  for n in "${needed[@]}"; do
+    if [[ -z "${cfg[Db$n]:-}" ]]; then
+      fn_error "The $n is empty and it's required"
+      fn_error "You must set connection string [From=] or [Db${n}=] properly"
+      return 1
+    fi
+  done
+  cfg[DbChecked]=1
+}
+
+# run postgres command with arguments parsed.
+bk_action_postgres_run() {
+  local app="${1:-$POSTGRES_CMD}"
+  local -a cmd=()
+  local -a env=()
+
+  bk_action_postgres_check || return 2
+
+  # set default arguments:
+  cmd=("$app" -h "${cfg[DbHost]:-localhost}")
+  [[ "$app" == *"_dumpall" ]] ||  cmd+=(-d "${cfg[DbName]:-postgres}")
+
+  [[ -n "${cfg[DbPort]}" ]] && cmd+=(-p "${cfg[DbPort]}") || cmd+=(-p 5432)
+  [[ -n "${cfg[DbUser]}" ]] && cmd+=(-U "${cfg[DbUser]}")
+
+  # Only set PGPASSWORD if provided (avoid clobbering existing env)
+  if [[ -n "${cfg[DbPass]:-}" ]]; then
+    env=(PGPASSWORD="${cfg[DbPass]}")
+  else
+    cmd+=(--no-password)
+  fi
+  local -a all_cmd=("${env[@]}" "${cmd[@]}" "$@")
+
+  "${env[@]}" "${cmd[@]}" "$@"
+}
+
 bk_action_postgres() {
   local task="$1" workdir="$2" artifactdir="$3"
-  # run postgres
-  echo "#HERE WILL BE THE SQL FILE" > "$w_dir/backup.sql"
+  local -a opts=("--format=directory" "--jobs=4" "--compress=0" --no-owner --no-privileges --blobs)
+  local file_ext="${cfg[DbFileExtension]:-}" file_name=
+  local -a cmd=()
+
+  # test connection
+  if ! bk_action_postgres_run fn_run "${POSTGRES_CHECK_CMD}" -c 'SELECT 1;' -tA; then
+    fn_error "Connection wasn't stablished with database!"
+    return 2
+  fi
+
+  #load command line options from config
+  if [[ -n "$cfg[DbBackupOpts]:-}" ]]; then
+    fn_cmdline_to_array opts "$cfg[DbBackupOpts]:-}"
+  fi
+
+  [[ -n "$file_ext" ]] && file_name="$(bk_build_artifact_name)${file_ext}"
+
+  # connection is ok! run backup
+  bk_action_postgres_run fn_run "${POSTGRES_CMD}" "${opts[@]}" \
+    --file="$workdir/$file_name"
+  # check command return
+  if [[ $? -ne 0 ]]; then
+    fn_error "Failed to run Backup job!"
+    return 2
+  fi
 }
 
 bk_action_copyfiles() {
   local task="$1" workdir="$2" artifactdir="$3"
   # RUN COPY FILES
-  echo "#HERE WILL BE THE COPIED FILES" > "$w_dir/backup.txt"
+  local -a cmd=()
+
+  cmd+=("${RSYNC_CMD}")
+
+  # CopyOptions: default to common rsync flags.
+  local rsync_opts=""
+  local -a cmdArr
+  fn_cmdline_to_array cmdArr "${cfg[CopyOptions]:--Cravzp}"
+  cmd+=("${cmdArr[@]}")
+
+  # Add include/exclude/filter arguments.
+  # Without prefix, options are: Includes=, Excludes=, etc..
+  bk_add_rsync_filters cmd
+
+  # Append From and To.
+  cmd+=("${cfg[From]}" "$artifactdir")
+
+  fn_run "${cmd[@]}"
+
 }
 
 bk_type_backup_remote() {
@@ -326,23 +423,24 @@ bk_type_backup_remote() {
     cmd+=("--update")
   fi
 
-  # Extra options (split by spaces).
+  # Extra options
   if [[ -n "${cfg[RemoteOptions]:-}" ]]; then
-    read -r -a _tmp_opts <<<"${cfg[RemoteOptions]}"
-    cmd+=("${_tmp_opts[@]}")
+    local -a cmdArr
+    fn_cmdline_to_array "cmdArr" "${cfg[RemoteOptions]}"
+    cmd+=("${cmdArr[@]}")
   fi
   #add filters
-  bk_add_rclone_filters cmd
+  # Every option should have Remote as prefix
+  # for example: RemoteExcludes=, RemoteIncludes=, etc..
+  bk_add_rclone_filters cmd "Remote"
+
   # add source and destination
   # source will be to (local) and remote will get the remote dest
   cmd+=("${cfg[To]}" "${cfg[Remote]}")
 
-  # debug
-  fn_debug "Executing: $(fn_quote_cmd cmd)"
-
   #execute
   #todo: uncomment
-  #"${cmd[@]}"
+  #fn_run "${cmd[@]}"
 }
 
 bk_type_backup_movefiles() {
@@ -351,14 +449,6 @@ bk_type_backup_movefiles() {
 
   [[ ! -f "${cfg[Artifact]}" ]] \
     && { fn_error "Task artifact file doesn't exist: ${cfg[Artifact]}"; return 1; }
-
-  #check if To is a temporary directory:
-  if [[ "${cfg[To]}" == tmp:* ]]; then
-    cfg[OriginalTo]="${cfg[To]}"
-    cfg[To]="$(bk_mktemp -d -t "backupfire.${task}.to")"
-    fn_debug "Using a temporary dest! It will be deleted at end of the execution:"
-    fn_debug "${cfg[To]}"
-  fi
 
   [[ ! -d "${cfg[To]}" ]] && mkdir -p "${cfg[To]}" || true
 
@@ -392,12 +482,24 @@ bk_type_backup_movefiles() {
 bk_type_backup_movefiles_tree() {
   local task="$1" workdir="$2" artifactdir="$3" to= group=
 
-  local groups=("yearly" "montly" "daily")
+  local groups=("yearly" "monthly" "weekly" "daily")
+  local now=$(date +"%Y-%m-%d")
+  local week=$(date +"%u")
 
   # create a file in each group
   for group in "${groups[@]}"; do
     [[ ! -d "${cfg[To]}/$group" ]] && mkdir -p "${cfg[To]}/$group" || true
-
+    case "$group" in
+      yearly)
+        [[ "$now" != *"-01-01" ]] && continue #only first day of the year
+        ;;
+      monthly)
+        [[ "$now" != *"-01" ]] && continue #only first day of the month
+        ;;
+      weekly)
+        [[ "$week" != "1" ]] && continue # only mondays
+        ;;
+    esac
     [[ ! -d "${cfg[To]}/$group" ]] \
       && { fn_error "Task destination is not a valid directory: ${cfg[To]}/$group"; return 1; }
 
@@ -427,7 +529,7 @@ bk_type_backup_movefiles_none() {
 
 bk_type_backup_util_cp() {
   local from="$1" to="$2"
-  rsync -a -- "$from" "$to"
+  fn_run rsync -a -- "$from" "$to"
   fn_debug "Moving files from: ${from} to: ${to}"
 }
 
@@ -474,12 +576,12 @@ bk_type_backup_encryption() {
 
     fn_debug "Encryption: Generating private key from public provided key.."
     #generate a private key to be used
-    $OPENSSL_CMD rand -base64 256 > "$secret"
-    $OPENSSL_CMD pkeyutl -encrypt -inkey "${cfg[PEMKeyFile]}" \
+    fn_run $OPENSSL_CMD rand -base64 256 > "$secret"
+    fn_run $OPENSSL_CMD pkeyutl -encrypt -inkey "${cfg[PEMKeyFile]}" \
       -pubin -in "$secret" -out "${artifact}.secret"
 
     fn_debug "Encrypting data.."
-    $OPENSSL_CMD enc -aes-256-cbc -salt -pbkdf2 -pass "file:$secret" \
+    fn_run $OPENSSL_CMD enc -aes-256-cbc -salt -pbkdf2 -pass "file:$secret" \
       -in "${cfg[Artifact]}" -out "${artifact}.enc"
 
     #delete the key as soon possible
@@ -488,7 +590,7 @@ bk_type_backup_encryption() {
     fn_debug "Packing encripted data in: ${artifact}.backup"
 
     # pack everything in a tar file (withouth compression)
-    tar -cf "${artifact}.backup" "${artifact}.secret" \
+    fn_run tar -cf "${artifact}.backup" "${artifact}.secret" \
       "${artifact}.enc"
 
     # sets the final production file
@@ -569,7 +671,7 @@ bk_type_backup_compression() {
       (cd "$workdir" && tar -czf "$out_file" . ) || { fn_error "Failed to compress into $out_file"; return 1; }
       ;;
     zip)
-      out_file="${artifactdir}/${base}.zip"
+      out_file="${artifactdir}/${file_name}.zip"
       ext=".zip"
       (cd "$workdir" && zip -qr "$out_file" . ) || { fn_error "Failed to compress into $out_file"; return 1; }
       ;;
@@ -630,7 +732,7 @@ bk_type_local() {
     return 0
   fi
 
-  fn_debug "Executing: $(fn_quote_cmd cmd)"
+  fn_run "${cmd[@]}"
 }
 
 # ---------------------------
@@ -662,6 +764,23 @@ bk_add_rclone_cmd() {
   return 1
 }
 
+# ---------------------------
+# Utilities
+# ---------------------------
+
+
+# fn_run: run a command; silence stdout+stderr unless F_DEBUG=1
+fn_run() {
+  if (( ${F_DEBUG:-0} )); then
+    # print command and show output and error
+    local -a cmd=("$@")
+    fn_debug ">> $(fn_quote_cmd cmd)"
+    "$@"
+  else
+    #ignore output
+    "$@" >/dev/null 2>&1
+  fi
+}
 
 
 # ---------------------------
@@ -669,16 +788,17 @@ bk_add_rclone_cmd() {
 # ---------------------------
 
 # bk_add_rsync_filters: append rsync include/exclude/filter arguments to a command array.
-# Usage: bk_add_rsync_filters cmd_array[@]
+# Usage: bk_add_rsync_filters cmd_array[@] "Remote"
 bk_add_rsync_filters() {
   local -n _cmd_ref="$1"
+  local pref="${2:-}" #prefix for include,Exclude and AutoFilters
 
   # AutoFilter: look for dotfiles under From/.<prefix>*.conf
-  local auto_prefix="${cfg[AutoFilterPrefix]:-}"
+  local auto_prefix="${cfg[${pref}AutoFilterPrefix]:-}"
   local pfx=""
   [[ -n "${auto_prefix// }" ]] && pfx="${auto_prefix}."
 
-  if fn_boolean "${cfg[AutoFilter]:-}"; then
+  if fn_boolean "${cfg[${pref}AutoFilter]:-}"; then
     local base="${cfg[From]%/}/.${pfx}"
     [[ -f "${base}includes.conf" ]] && _cmd_ref+=("--include-from=${base}includes.conf")
     [[ -f "${base}excludes.conf" ]] && _cmd_ref+=("--exclude-from=${base}excludes.conf")
@@ -686,37 +806,37 @@ bk_add_rsync_filters() {
   fi
 
   # Explicit filter file.
-  if [[ -n "${cfg[FilterFrom]:-}" ]]; then
-    if [[ -r "${cfg[FilterFrom]}" ]]; then
+  if [[ -n "${cfg[${pref}FilterFrom]:-}" ]]; then
+    if [[ -r "${cfg[${pref}FilterFrom]}" ]]; then
       _cmd_ref+=("--filter=merge ${cfg[FilterFrom]}")
     else
-      fn_error "[${cfg[Name]}] FilterFrom not readable: ${cfg[FilterFrom]}"
+      fn_error "[${cfg[Name]}] ${pref}FilterFrom not readable: ${cfg[${pref}FilterFrom]}"
       return 1
     fi
   fi
 
   # Include/exclude from file.
-  if [[ -n "${cfg[IncludeFrom]:-}" ]]; then
-    [[ -r "${cfg[IncludeFrom]}" ]] || { fn_error "IncludeFrom not readable: ${cfg[IncludeFrom]}"; return 1; }
-    _cmd_ref+=("--include-from=${cfg[IncludeFrom]}")
+  if [[ -n "${cfg[${pref}IncludeFrom]:-}" ]]; then
+    [[ -r "${cfg[${pref}IncludeFrom]}" ]] || { fn_error "${pref}IncludeFrom not readable: ${cfg[${pref}IncludeFrom]}"; return 1; }
+    _cmd_ref+=("--include-from=${cfg[${pref}IncludeFrom]}")
   fi
-  if [[ -n "${cfg[ExcludeFrom]:-}" ]]; then
-    [[ -r "${cfg[ExcludeFrom]}" ]] || { fn_error "ExcludeFrom not readable: ${cfg[ExcludeFrom]}"; return 1; }
-    _cmd_ref+=("--exclude-from=${cfg[ExcludeFrom]}")
+  if [[ -n "${cfg[${pref}ExcludeFrom]:-}" ]]; then
+    [[ -r "${cfg[${pref}ExcludeFrom]}" ]] || { fn_error "${pref}ExcludeFrom not readable: ${cfg[${pref}ExcludeFrom]}"; return 1; }
+    _cmd_ref+=("--exclude-from=${cfg[${pref}ExcludeFrom]}")
   fi
 
   # Inline Includes/Excludes (comma-separated).
   local s
-  if [[ -n "${cfg[Includes]:-}" ]]; then
-    IFS=',' read -r -a _arr <<<"${cfg[Includes]}"
+  if [[ -n "${cfg[${pref}Includes]:-}" ]]; then
+    IFS=',' read -r -a _arr <<<"${cfg[${pref}Includes]}"
     for s in "${_arr[@]}"; do
       s="$(fn_trim "$s")"
       [[ -z "$s" ]] && continue
       _cmd_ref+=("--include=$s")
     done
   fi
-  if [[ -n "${cfg[Excludes]:-}" ]]; then
-    IFS=',' read -r -a _arr <<<"${cfg[Excludes]}"
+  if [[ -n "${cfg[${pref}Excludes]:-}" ]]; then
+    IFS=',' read -r -a _arr <<<"${cfg[${pref}Excludes]}"
     for s in "${_arr[@]}"; do
       s="$(fn_trim "$s")"
       [[ -z "$s" ]] && continue
@@ -729,42 +849,43 @@ bk_add_rsync_filters() {
 # Usage: bk_add_rclone_filters cmd_array[@]
 bk_add_rclone_filters() {
   local -n _cmd_ref="$1"
+  local pref="${2:-}" #prefix for include,Exclude and AutoFilters
 
-  local auto_prefix="${cfg[AutoFilterPrefix]:-}"
+  local auto_prefix="${cfg[${pref}AutoFilterPrefix]:-}"
   local pfx=""
   [[ -n "${auto_prefix// }" ]] && pfx="${auto_prefix}."
 
-  if fn_boolean "${cfg[AutoFilter]:-}"; then
+  if fn_boolean "${cfg[${pref}AutoFilter]:-}"; then
     local base="${cfg[From]%/}/.${pfx}"
     [[ -f "${base}filters.conf" ]] && _cmd_ref+=("--filter-from=${base}filters.conf")
     [[ -f "${base}includes.conf" ]] && _cmd_ref+=("--include-from=${base}includes.conf")
     [[ -f "${base}excludes.conf" ]] && _cmd_ref+=("--exclude-from=${base}excludes.conf")
   fi
 
-  if [[ -n "${cfg[FilterFrom]:-}" ]]; then
-    [[ -r "${cfg[FilterFrom]}" ]] || { fn_error "FilterFrom not readable: ${cfg[FilterFrom]}"; return 1; }
+  if [[ -n "${cfg[${pref}FilterFrom]:-}" ]]; then
+    [[ -r "${cfg[${pref}FilterFrom]}" ]] || { fn_error "${pref}FilterFrom not readable: ${cfg[${pref}FilterFrom]}"; return 1; }
     _cmd_ref+=("--filter-from=${cfg[FilterFrom]}")
   fi
-  if [[ -n "${cfg[IncludeFrom]:-}" ]]; then
-    [[ -r "${cfg[IncludeFrom]}" ]] || { fn_error "IncludeFrom not readable: ${cfg[IncludeFrom]}"; return 1; }
-    _cmd_ref+=("--include-from=${cfg[IncludeFrom]}")
+  if [[ -n "${cfg[${pref}IncludeFrom]:-}" ]]; then
+    [[ -r "${cfg[${pref}IncludeFrom]}" ]] || { fn_error "${pref}IncludeFrom not readable: ${cfg[${pref}IncludeFrom]}"; return 1; }
+    _cmd_ref+=("--include-from=${cfg[${pref}IncludeFrom]}")
   fi
-  if [[ -n "${cfg[ExcludeFrom]:-}" ]]; then
-    [[ -r "${cfg[ExcludeFrom]}" ]] || { fn_error "ExcludeFrom not readable: ${cfg[ExcludeFrom]}"; return 1; }
-    _cmd_ref+=("--exclude-from=${cfg[ExcludeFrom]}")
+  if [[ -n "${cfg[${pref}ExcludeFrom]:-}" ]]; then
+    [[ -r "${cfg[${pref}ExcludeFrom]}" ]] || { fn_error "ExcludeFrom not readable: ${cfg[${pref}ExcludeFrom]}"; return 1; }
+    _cmd_ref+=("--exclude-from=${cfg[${pref}ExcludeFrom]}")
   fi
 
   local s
-  if [[ -n "${cfg[Includes]:-}" ]]; then
-    IFS=',' read -r -a _arr <<<"${cfg[Includes]}"
+  if [[ -n "${cfg[${pref}Includes]:-}" ]]; then
+    IFS=',' read -r -a _arr <<<"${cfg[${pref}Includes]}"
     for s in "${_arr[@]}"; do
       s="$(fn_trim "$s")"
       [[ -z "$s" ]] && continue
       _cmd_ref+=("--include=$s")
     done
   fi
-  if [[ -n "${cfg[Excludes]:-}" ]]; then
-    IFS=',' read -r -a _arr <<<"${cfg[Excludes]}"
+  if [[ -n "${cfg[${pref}Excludes]:-}" ]]; then
+    IFS=',' read -r -a _arr <<<"${cfg[${pref}Excludes]}"
     for s in "${_arr[@]}"; do
       s="$(fn_trim "$s")"
       [[ -z "$s" ]] && continue
@@ -811,17 +932,18 @@ bk_run_hook() {
   done
 
   # Split to argv array without using eval.
-  fn_cmdline_to_array "$hook_str"
-  [[ ${#toCmdArray[@]} -eq 0 ]] && return 0
+  local -a cmdArr
+  fn_cmdline_to_array "cmdArr" "$hook_str"
+  [[ ${#cmdArr[@]} -eq 0 ]] && return 0
 
   # Resolve hook command.
-  local cmd="${toCmdArray[0]}"
+  local cmd="${cmdArr[0]}"
   if [[ -x "$cmd" && -f "f$cmd" ]]; then
     : # external executable
   else
     case "$cmd" in
-      checkSize)  toCmdArray[0]="bk_hook_check_size";;
-      countFiles) toCmdArray[0]="bk_hook_count_files";;
+      checkSize)  cmdArr[0]="bk_hook_check_size";;
+      countFiles) cmdArr[0]="bk_hook_count_files";;
       *)
         fn_error "Hook command not found: $cmd"
         return 1
@@ -834,7 +956,7 @@ bk_run_hook() {
   local From="${cfg[From]}" To="${cfg[To]}" Name="${cfg[Name]}" Type="${cfg[Type]}" Moment="$moment"
   export From To Name Type Moment
 
-  "${toCmdArray[@]}"
+  "${cmdArr[@]}"
   local ret=$?
 
   unset From To Name Type Moment
