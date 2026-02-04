@@ -80,6 +80,10 @@ fn_debug() { # show only in debug mode
     return 0
 }
 
+fn_wait() {
+  read -p "Press [Enter] key to continue..."
+}
+
 # fn_quote_cmd: render a command array as a shell-escaped one-liner.
 # Usage: fn_quote_cmd cmd_array[@]
 fn_quote_cmd() {

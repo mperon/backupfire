@@ -34,7 +34,7 @@ ARG PG_UID=10001
 ARG PG_GID=10001
 RUN addgroup -g "${PG_GID}" -S backup \
   && adduser -S -D -h /home/backup -s /bin/bash -u "${PG_UID}" -G backup backup \
-  && mkdir -p /app /app/data /app/config /home/backup/.config \
+  && mkdir -p /app /app/data /app/config \
   && chown -R backup:backup /app /home/backup \
   && chmod -R u+rwX,g+rwX /app /home/backup
 
@@ -49,15 +49,13 @@ ENV BK_CONFIG_DIR=/app/config
 # Example: BK_CRON="0 2 * * *"
 ENV BK_CRON=""
 
-#COPY default config to /home/pgbackup
-COPY ./config/ /home/pgbackup/.config/
-
 # Copy your app/script into /app
-COPY internal-pgbackup.sh /app/internal-pgbackup.sh
+COPY backupfire.sh /app/backupfire
+COPY backupfire_lib.sh /app/backupfire_lib.sh
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Make scripts executable
-RUN chmod 755 /app/internal-pgbackup.sh /app/docker-entrypoint.sh \
+RUN chmod 755 /app/*.sh \
   && chown -R backup:backup /app /home/pgbackup
 
 # Declare mount points for persistence/config injection

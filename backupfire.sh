@@ -37,7 +37,7 @@ RSYNC_CMD="${RSYNC_CMD:-rsync}"
 RCLONE_CMD="${RCLONE_CMD:-rclone}"
 OPENSSL_CMD="${OPENSSL_CMD:-openssl}"
 RCLONE_CONFIG="${RCLONE_CONFIG:-}"
-POSTGRES_CMD="${POSTGRES_CMD:-pgdump}"
+POSTGRES_CMD="${POSTGRES_CMD:-pg_dump}"
 POSTGRES_CHECK_CMD="${POSTGRES_CHECK_CMD:-psql}"
 
 
@@ -229,11 +229,14 @@ bk_type_backup() {
   # - workdir: where the Vault Action writes files
   # - artifactdir: where we write archives (kept outside workdir to avoid tar "file changed" warnings)
   task="${cfg[Name]}"
-  cfg[WorkDir]="$(bk_mktemp -d -t "backupfire.${task}.work")"
-  cfg[ArtifactDir]="$(bk_mktemp -d -t "backupfire.${task}.artifacts")"
+  bk_mktemp_set 'cfg[WorkDir]' "$task" "work"
+  bk_mktemp_set 'cfg[ArtifactDir]' "$task" "artifacts"
   w_dir="${cfg[WorkDir]}" a_dir="${cfg[ArtifactDir]}"
   fn_debug "[$task]      Task workdir: ${cfg[WorkDir]}"
   fn_debug "[$task] Task artifact dir: ${cfg[ArtifactDir]}"
+
+  declare -p CLEANUP
+  fn_wait
 
   # dispatch to Action.
   local action="${cfg[Action]:-copy}"
@@ -260,7 +263,7 @@ bk_type_backup() {
   #check if To is a temporary directory:
   if [[ "${cfg[To]}" == tmp:* ]]; then
     cfg[OriginalTo]="${cfg[To]}"
-    cfg[To]="$(bk_mktemp -d -t "backupfire.${task}.to")"
+    bk_mktemp_set 'cfg[To]' "$task" "to"
     fn_debug "Using a temporary dest! It will be deleted at end of the execution:"
     fn_debug "${cfg[To]}"
   fi
@@ -322,8 +325,8 @@ bk_action_postgres_check() {
 # run postgres command with arguments parsed.
 bk_action_postgres_run() {
   local app="${1:-$POSTGRES_CMD}"
+  shift
   local -a cmd=()
-  local -a env=()
 
   bk_action_postgres_check || return 2
 
@@ -336,13 +339,18 @@ bk_action_postgres_run() {
 
   # Only set PGPASSWORD if provided (avoid clobbering existing env)
   if [[ -n "${cfg[DbPass]:-}" ]]; then
-    env=(PGPASSWORD="${cfg[DbPass]}")
+    export PGPASSWORD="${cfg[DbPass]}"
   else
     cmd+=(--no-password)
   fi
-  local -a all_cmd=("${env[@]}" "${cmd[@]}" "$@")
 
-  "${env[@]}" "${cmd[@]}" "$@"
+  fn_run "${cmd[@]}" "$@"
+  local ret=$?
+
+  # Remove the password
+  export -n PGPASSWORD
+
+  return $ret
 }
 
 bk_action_postgres() {
@@ -352,21 +360,22 @@ bk_action_postgres() {
   local -a cmd=()
 
   # test connection
-  if ! bk_action_postgres_run fn_run "${POSTGRES_CHECK_CMD}" -c 'SELECT 1;' -tA; then
+  if ! bk_action_postgres_run "${POSTGRES_CHECK_CMD}" -c 'SELECT 1;' -tA; then
     fn_error "Connection wasn't stablished with database!"
     return 2
   fi
 
   #load command line options from config
-  if [[ -n "$cfg[DbBackupOpts]:-}" ]]; then
-    fn_cmdline_to_array opts "$cfg[DbBackupOpts]:-}"
+  if [[ -n "${cfg[DbBackupOpts]:-}" ]]; then
+    fn_cmdline_to_array opts "${cfg[DbBackupOpts]:-}"
   fi
 
   [[ -n "$file_ext" ]] && file_name="$(bk_build_artifact_name)${file_ext}"
 
   # connection is ok! run backup
-  bk_action_postgres_run fn_run "${POSTGRES_CMD}" "${opts[@]}" \
+  bk_action_postgres_run "${POSTGRES_CMD}" "${opts[@]}" \
     --file="$workdir/$file_name"
+
   # check command return
   if [[ $? -ne 0 ]]; then
     fn_error "Failed to run Backup job!"
@@ -391,8 +400,8 @@ bk_action_copyfiles() {
   # Without prefix, options are: Includes=, Excludes=, etc..
   bk_add_rsync_filters cmd
 
-  # Append From and To.
-  cmd+=("${cfg[From]}" "$artifactdir")
+  # Copy files to workdir
+  cmd+=("${cfg[From]}" "$workdir")
 
   fn_run "${cmd[@]}"
 
@@ -439,8 +448,7 @@ bk_type_backup_remote() {
   cmd+=("${cfg[To]}" "${cfg[Remote]}")
 
   #execute
-  #todo: uncomment
-  #fn_run "${cmd[@]}"
+  fn_run "${cmd[@]}"
 }
 
 bk_type_backup_movefiles() {
@@ -548,8 +556,13 @@ bk_type_backup_util_date() {
 bk_type_backup_encryption() {
   local task="$1" workdir="$2" artifactdir="$3"
 
+  if ! fn_boolean "${cfg[Encrypt]:-True}"; then
+    fn_debug "Encription was disabled by Encrypt= option. skipping..."
+    return 0
+  fi
+
   [[ -z "${cfg[EncryptKeyFile]}" ]] && [[ -z "${cfg[EncryptKey]}" ]] && { \
-    fn_debug "Encription was disabled. skipping..."
+    fn_debug "Encription was disabled by not setting EncryptKey* opts. skipping..."
     return 0
   }
 
@@ -571,7 +584,8 @@ bk_type_backup_encryption() {
 
   pushd "${cfg[ArtifactDir]}" >/dev/null || return 1
 
-    local secret="$(bk_mktemp -t "backupfire.${task}.secret")"
+    local secret=
+    bk_mktemp_set 'secret' "$task" "secret" -f
     local artifact="$(bk_build_artifact_name)"
 
     fn_debug "Encryption: Generating private key from public provided key.."
@@ -603,9 +617,9 @@ bk_type_backup_encryption() {
 }
 
 bk_backup_encryption_checks() {
-  local tempk= firstline=
-  local keyf="$(bk_mktemp -t "backupfire.${task}.keyfile")"
-  local sshk="$(bk_mktemp -t "backupfire.${task}.ssh-temp")"
+  local tempk= firstline= encd=
+  bk_mktemp_set 'encd' "$task" "encd"
+  local keyf="$encd/keyfile"  sshk="$encd/ssh-temp"
 
   #check if encription key is set (file or text)
   if [[ -n "${cfg[EncryptKeyFile]}" ]]; then
@@ -703,7 +717,7 @@ bk_build_artifact_name() {
     cfg[Timestamp]="$(date +%s)"
     cfg[DateStr]="$ts"
   }
-  printf "$fmt" "${cfg[FilePrefix]}" "${cfg[Name]}" "${cfg[DateStr]}" "$@"
+  printf "$fmt" "${cfg[FilePrefix]}" "${cfg[DateStr]}" "${cfg[Name]}" "$@"
 }
 
 # bk_type_local: rsync local->local.
@@ -1178,10 +1192,29 @@ bk_mktemp() {
   printf '%s' "$tmp"
 }
 
+
+# bk_mktemp_set: create temp path and assign it to a variable/expression, plus register cleanup.
+# Usage: bk_mktemp_set 'cfg[WorkDir]' "$task" "to"
+bk_mktemp_set() {
+  local target="$1" task="$2" kind="$3" type="${4:-dir}"
+  local tmp= tpl="backupfire.${task}.${kind}.XXXXXX"
+  local args=()
+  case "${type,,}" in
+    f|file|-f);;
+    dir|d|-d) args+=('-d');;
+  esac
+
+  tmp="$(mktemp "${args[@]}" -t "$tpl" 2>/dev/null)" || \
+    tmp="$(mktemp "${args[@]}" "${TMPDIR:-/tmp}/${tpl}")" || \
+    return 1
+  CLEANUP+=("$tmp")
+  printf -v "$target" '%s' "$tmp"
+}
+
 bk_cleanup() {
   local path
   ((${#CLEANUP[@]} == 0)) && return 0 # Array is empty, nothing to do
-  fn_debug "Cleaning up temporary directories created.."
+  fn_debug "Cleaning up temporary files/directories created.."
   for path in "${CLEANUP[@]}"; do
     if [[ "$path" == /tmp/* ]] || [[ "$path" == /var/folders/* ]]; then
       fn_debug "Cleaning up $path .."
