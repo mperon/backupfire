@@ -50,6 +50,7 @@ BK_LIST=""
 BK_HELP=""
 BK_DRY_RUN=""
 BK_TEST_ENV=""
+BK_GEN_CRON=""
 
 # Positional: requested tasks (section names).
 TASKS=() CLEANUP=() UPLOADS=()
@@ -1069,6 +1070,7 @@ OPTIONS
   -d         debug (verbose logs)
   -l         list tasks + short description
   -T         test environment (check required commands), then exit
+  -C         generate cron jobs based in the configuration
   -h         show this help
 
 EXAMPLES
@@ -1166,10 +1168,11 @@ set_all_runnable_tasks() {
 # Usage: bk_parse_args "$@"
 bk_parse_args() {
   local opt
-  while getopts ":ac:e:ndlhT" opt; do
+  while getopts ":ac:e:ndlhTC" opt; do
     case "$opt" in
       a) BK_ALL=1;;
       c) BK_CONFIG="$OPTARG";;
+      c) BK_GEN_CRON=1;;
       e) BK_EMAIL="$OPTARG";;
       n) BK_DRY_RUN=1;;
       d) F_DEBUG=1;;
@@ -1226,6 +1229,12 @@ bk_cleanup() {
   CLEANUP=()
 }
 
+bk_generate_cron() {
+  # iterate over the tasks
+
+  # check cron settings
+
+}
 
 # bk_main: program entry point.
 # Usage: bk_main "$@"
@@ -1267,10 +1276,18 @@ bk_main() {
     fi
   fi
 
+
+
   if [[ ${#TASKS[@]} -eq 0 ]]; then
     fn_error "You must provide at least one action, or use -a"
     print_global_help
     return 2
+  fi
+
+  if [[ -n "${BK_GEN_CRON:-}" ]]; then
+    fn_debug "Generation crontab jobs:"
+    bk_generate_cron
+    return 0
   fi
 
   # Execute each requested action (with deps).
