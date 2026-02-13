@@ -3,7 +3,6 @@
 #
 # Shared helper functions for backupfire.sh.
 # Designed for Alpine Linux (busybox userspace) with bash installed.
-set -o pipefail
 
 ###############################################################################
 # Default variables

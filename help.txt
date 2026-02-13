@@ -1,0 +1,314 @@
+This is a prompt to give ChatGPT enought information to generate help
+information on config files and actions avaliable:
+
+Generate a README.md based on the information that I will give you below, with
+sections about what the backupFire is, what it does, what it is for. Also, read the
+codebase to better understand every topic and give more detailed information. Write as
+a documentation, where the person can install, run and configure backupFire. Use code
+comments, the code itself and my notes below to generate detailed documentation. Write in
+section an use best practices. every time I put something in () with a (chat: something) the something
+is instructions to you.
+
+
+# Name:
+backupFire (version, read from VERSION file)
+
+# WHATS FOR:
+  backupfire executes "tasks" defined in an INI config file.
+  Each task is a section like [pictures] with keys like Type, From, To.
+  The application was created to be easy to backup files, databases and
+  docker logs, or sync files from one source to another, using scheduled
+  tasks (cron jobs) and filters, and remote uploads.
+
+Next, create sections:
+1) Docker Image
+The app was designed to run on a Docker, using alpine image as base. you can use
+mperon/backupfire:latest as image name to run. To configure, you need to set up:
+
+  backupfire:
+    build:
+      context: .
+    container_name: mperon/backupfire:latest
+    # Mounts:
+    # - ./data   -> backups output
+    # - ./config -> config/key files (read-only)
+    # - ./sources -> sources directories you want to backup files (you can have several folder in)
+    volumes:
+      - ./volumes/data:/app/data
+      - ./volumes/config:/app/config:ro
+      - ./var/www:/app/sources/www:ro
+      - ./var/logs:/app/sources/logs:ro
+    environment:
+      BK_CONFIG=new.conf
+
+Show using docker-compose but also docker-run.  tell that the files that need to
+be backuped need to be mounted, so I suggest use the directory /app/sources.
+Show the environment variables that can be configured:
+Command overwrite:
+RSYNC_CMD="${RSYNC_CMD:-rsync}"
+RCLONE_CMD="${RCLONE_CMD:-rclone}"
+OPENSSL_CMD="${OPENSSL_CMD:-openssl}"
+POSTGRES_CMD="${POSTGRES_CMD:-pg_dump}"
+POSTGRES_CHECK_CMD="${POSTGRES_CHECK_CMD:-psql}"
+DOCKER_CMD="${DOCKER_CMD:-docker}"
+Config overwrite:
+BK_CONFIG="${BK_CONFIG:-}"
+RCLONE_CONFIG="${RCLONE_CONFIG:-}"
+
+The config files default is empty because the script will search for them.
+For BK_CONFIG: It will search default.conf in the directories:
+"$SCRIPT_DIR/config" "$HOME/config/" "/etc/backupfire"
+For RCLONE_CONFIG: It will search "rclone.conf" ".rclone.conf" in the directories:
+"$SCRIPT_DIR/config" "$HOME/config/" "/etc/backupfire" "$HOME"
+
+The config files will be explained in other sections.
+
+1.1) Configuration
+1.1.1) The most important file is config/default.conf. This file is a ini file that will have all
+tasks configured (each ini section is a task and each task has their own configuration). The section
+[General] is where you put all default configuration that can be overwritten by each task.
+This is a sample file:
+[General]
+BackupLimit=True
+KeepWeekly=10
+KeepDaily=30
+KeepMonthly=12
+KeepYearly=5
+DateFormat="%Y%m%d%H%M%S"
+FilePrefix=bk_
+BackupStructure=tree
+RemoteDefaultOpts=True
+EncryptKey="ssh-rsa AAAAB3..."
+DockerSocket=/var/log/docker.sock #default
+
+[Database]
+Type=Backup
+Action=postgres
+From=postgres://postgres:mysecretpassword@localhost:5469/invtech_ia
+To=tmp:/
+Compression=tar.gz
+Encrypt=True
+Remote=pcloud:/BackupFire/
+Skip=False
+
+[VirtualMachines]
+Type=Backup
+Action=CopyFiles
+From=./volumes/uploads/
+Encrypt=False
+To=tmp:/
+Compression=tar.gz
+Encrypt=True
+Remote=pcloud:/BackupFire/
+
+[DockerLogs]
+Type=Backup
+Action=DockerLog
+To=tmp:/
+Compression=tar.gz
+Encrypt=True
+Remote=pcloud:/BackupFire/
+
+Before going to each section of the config, lets see each Type and Action we have
+enabled in the program.
+
+A type of an task is how it will be run. Inside a task you have an action, that is what you want to do.
+Each Type have their own Actions, that correlates with the type.
+
+We have today three types of tasks:
+a) Local: the Type local only run locally, doesnt upload files to remote. Usually you use it
+to copy files locally. You dont need to specify an Action because there is only one: CopyFiles.
+b) Remote: The type remote only upload files from a source to a destiny. You dont need to specify an Action because there is only one: CopyFiles.
+c) Backup: This type is the most complex one we have today, becase have several actions but also backup
+will run the action (copy files, database backup, log backup, etc..) in an working dir, compress it, then can encript and upload to a remote.
+So, as complex it its, we gonna spend more time with it. Backup has three actions today:
+c.1) Database | Db | Postgres: connect to a postgres database, and generate a full backup from it. The options will be
+discussed in anoter section. (generate a backup from the database, compress, encrypt and upload, if configured)
+c.2) CopyFiles | copy | files: copy files from From and compress, encrypt and upload (if configured).
+c.3) DockerLogs | logs: generate a dump from logs in docker services currently running and compress, encrypt and upload (if configured).
+
+We can add more Types and Actions in the future, if we see the need. The tool was designed to be extensible.
+
+Now lets go option by option in the config file (default.conf):
+First, lets go to the General configurations, to see what we can set by default. all will be in
+[General] section. but remember that you can set any default in it but will be for every task in the file.
+I will put Option=default value and below it, an expanation. in the config file it will be set like Config=option. Also, boolean values can be
+1|true|yes|y|t|s) for true and 0|false|no|n|f for false, in any case (upper, lower, mixed). Find the best way
+to show the user and explain him the options visually.
+
+[General]
+Super=False
+Run the app as superuser (sudo). Not reccomended. Default is N
+
+BackupLimit=True
+Limit the backup files. This is useful to automatically limit the number of files based in
+the rules in the options Keep* that I will show below. If false, it will not limit files and
+will not generate weekly, daily, montly and yearly copies. If set true, will copy the backup to have
+one per day, week, month and year of the backup.
+
+KeepWeekly=10
+Number of backup files that will be stores of weekly
+KeepDaily=30
+Number of backup files that will be stores of daily
+KeepMonthly=12
+Number of backup files that will be stores of montly
+KeepYearly=5
+Number of backup files that will be stores yearly
+
+DateFormat="%Y%m%d%H%M%S"
+This is the default date format to use in the backup files names.
+
+FilePrefix=bk_
+The default backup files prefix
+
+BackupStructure=tree
+Define the backup structure, tree will use folder for each time (day, week, month..),
+none will save in a sigle directory all files.
+
+RemoteDefaultOpts=True
+Define if you will use default remote (rclone) options.
+The default options are:
+    --auto-confirm --fast-list --quiet --retries 3
+    --exclude '.*' --retries-sleep 1m --timeout 1m
+    --update
+
+EncryptKey="ssh-rsa AAAAxxx"
+The default encryption key used to all tasks. You can overwrite to each task.
+Today, the key need to be an public ssh-rsa key. (chat: teach them how to generate one)
+
+Type=
+I dont recommend setting a default Type, but you can here. You can overwrite to each task.
+
+Action=
+I dont recommend setting a default Action, but you can here. You can overwrite to each task.
+
+DockerSocket=/var/run/docker.sock
+Default socket file that the app will look to run docker commands. you need to mount the socket file
+from the vps to be able to find and execute commands in the services running (chat: teach them how to
+mount a docker socket in the current docker-compose example or docker run")
+
+Now, for each section, you have options that can be used in all types and actions.
+
+Excludes=
+Excludes rules, separeted by , (*.jpg,*.xls).
+
+Includes=
+Includes rules, separeted by , (*.jpg,*.xls).
+
+IncludeFrom=
+Inlcude from file (replaces ~ w home and ./ with From)
+
+ExcludeFrom=
+Excludes from file (replaces ~ w home and ./ with From)
+
+Options=
+Put this modifies to action program
+
+AutoFilter=n
+When set, Autofilter tries to find files in From/
+using format: .excludes.conf | .includes.conf
+        .filter.conf
+
+AutoFilterPrefix=remote
+When AutoFilter is set, add this prefix in search
+By ex, [remote] prefix, AutoFilter tries to find:
+.remote.excludes.conf | .remote.includes.conf
+        .remote.filter.conf
+
+Email=
+Define the email to send this action (not implemented yet)
+
+Depends=
+List of actions that this action depens
+Be careful to not add circular dependencies and this
+will not run. Separeted by commas, ex: Depends=pictures,database
+
+Skip=True
+Skip this action in all
+
+Before=checkSize %From% > 10mb
+After=checkSize %To% > 8mb
+Run before/after a action is performed. You can create a script
+and check if network folder is mounted, or check number of files
+size of dir, etc..
+backupFire passes to script enviroment variables as From, To, etc..
+besides, you can use all action options with %% as %To%, etc..
+Backup has several internal programs useful:
+  checkSize [folder] [operator] [size]
+  Check the size of folder using operators: >, >=, <, <=, !=
+  Example: Before=checkSize "%From%" > 10mb
+
+  countFiles [folder] [operator] [size]
+  Check count the files of folder using operators: >, >=, <, <=, !=
+  Example: Before=countFiles "%From%" > 23.000
+
+Is important to know that if Before is set, the action will only run if
+the before script is sucessfull (returns 0). if not, stops the action!
+All dependencies actions will not be executed!
+If after is set, then the action will be executed, but all dependent actions
+will not be called.
+Or any apllication or script: Before=~/bin/doSomething.sh --dir=%From% --countWordFiles=33
+
+Compression=tar
+Select which algoritm will be used. Options are: tar, tar.gz, zip.
+It only work in Type=Backup
+
+CopyOptions
+DateFormat
+DateStr
+DbBackupOpts
+DbChecked
+DbFileExtension
+DbHost
+DbName
+DbPass
+DbPort
+DbUser
+DockerSocket
+Encrypt
+EncryptKey
+EncryptKeyFile
+FilePrefix
+FilterFrom
+From
+Name
+Options
+Remote
+RemoteDefaultOpts
+RemoteOptions
+Skip
+To
+Type
+
+
+
+
+
+
+
+
+
+You can have multiple config files in the conf directory and choose the one using
+backupfire -c file, for example, backupfire -c new.conf. If you are using docker compose
+you can set the variable BK_CONFIG= with the file. (show an example to the user)
+
+
+The other important file in config folder is rclone.conf. This file need to have
+a valid rclone config. If you want to upload files to remote, this file is mandatory
+You can create locally in your machine by running rclone config and then copying The
+file $HOME/.rclone.conf to the config/ folder. Also, you can run in the image, by running
+docker run -it /bin/bash; and then run rclone config there. The program is smart enought
+to find the .rclone.conf file there if not provided by you. You can set where rclone config is
+by setting in [General] the config: RemoteConfigFile=path_to_file
+A sample rclone.conf file:
+[pcloud]
+type = pcloud
+hostname = api.pcloud.com
+token = {"access_token":"...","token_type":"bearer","expiry":"0001-01-01T00:00:00Z"}
+
+
+2) Installing
+2.1) programs that backupfire depends:
+rsync, rclone, openssl, pg_dump, psql, docker-client, zip, gz, grep, bash
+2.2) to install in a mac
+gives the step by step to install all in a mac
