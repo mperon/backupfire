@@ -26,13 +26,11 @@ The app was designed to run on a Docker, using alpine image as base. you can use
 mperon/backupfire:latest as image name to run. To configure, you need to set up:
 
   backupfire:
-    build:
-      context: .
-    container_name: mperon/backupfire:latest
+    image: mperon/backupfire:latest
     # Mounts:
-    # - ./data   -> backups output
-    # - ./config -> config/key files (read-only)
-    # - ./sources -> sources directories you want to backup files (you can have several folder in)
+    # - /app/data   -> backups output
+    # - /app/config -> config/key files (read-only)
+    # - /app/sources -> sources directories you want to backup files (you can have several folder in)
     volumes:
       - ./volumes/data:/app/data
       - ./volumes/config:/app/config:ro
