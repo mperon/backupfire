@@ -10,6 +10,9 @@
 #              then optionally compress and encrypt before copying to destination.
 set -o pipefail
 
+# SCRIPT NAME
+SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
+
 # Resolve script directory (safe when invoked via symlink).
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 

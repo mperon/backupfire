@@ -17,9 +17,6 @@ bk_action_dockerlogs() {
 
   # execute docker and backup file in workdir=
   bk_action_dockerlogs_each "${cfg[From]:-}" "bk_action_dockerlogs_getlog" "$workdir"
-
-  #
-
 }
 
 
@@ -59,13 +56,13 @@ bk_action_dockerlogs_each() {
   bk_util_docker_run ps --format '{{.ID}} {{.Names}}' \
   | while IFS=' ' read -r cid name; do
     # verifica se alguma query bate
-    for query in "${filters[@]}"; do
-      if [[-z "$query" ]] || [[ *"$query"* == "$name" ]]; then
+    for s in "${filters[@]}"; do
+      s="${s//[[:space:]]/}"; s="${s,,}"; query="$s"
+      if [[-z "$query" ]] || [[ "${query// /}" == "all" ]] || [[ *"${query// /}"* == "$name" ]]; then
         fn_debug "Backuping up logs from $name"
         $action "$cid" "$name" "$@"
-        if [[ $? -ne 0 ]]; then
-
-        fi
+        break
+      fi
     done
   done
 }

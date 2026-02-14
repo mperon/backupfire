@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 #
 # Constants and global variables
-
 # ---------------------------
 # Constants / defaults
 # ---------------------------
-SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 SCRIPT_VERSION="2.0.1"
 
 # Default config search locations.
@@ -27,6 +25,8 @@ DOCKER_CMD="${DOCKER_CMD:-docker}"
 # Options variables
 ###############################################################################
 BK_ALL=""
+BK_DECRYPT="" # action decryption of a specific file or files
+BK_DECRYPT_KEY="" # private key to be used
 BK_EMAIL="" # Reserved for future (email reporting)
 BK_CONFIG="${BK_CONFIG:-}"
 RCLONE_CONFIG="${RCLONE_CONFIG:-}"

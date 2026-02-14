@@ -21,7 +21,7 @@ fn_run() {
 # bk_build_artifact_name
 # Uses keys: DateFormat, FilePrefix
 # usagbk_build_artifact_namee: bk_build_artifact_name "daily" ".enc"
-bk_build_artifact_namee() {
+bk_build_artifact_name() {
   local fmt='%s%s_%s' ts=
   for _ in "$@"; do fmt+='%s'; done
   # create timestamp if not defined (to be reused in other file compositions)

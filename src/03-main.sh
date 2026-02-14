@@ -17,10 +17,29 @@ bk_main() {
     return 0
   fi
 
+  # decryption
+  if [[ -n "${BK_DECRYPT}" ]]; then
+    if [[ -n "$BK_LIST" ]] || [[ -n "$BK_TEST_ENV" ]] || \
+      [[ -n "$BK_ALL" ]] || [[ -n "$BK_GEN_CRON" ]] || \
+      [[ "${#TASKS[@]}" -gt 0 ]] || [[ -n "$BK_GEN_CRON" ]]; then
+      fn_error "You cant pass other arguments to -D except the path"
+      return 2
+    fi
+    bk_cmd_decrypt
+    return $?
+  fi
+
+
   # load config
   if ! bk_resolve_config; then
     fn_error "Config file not found or not readable."
     die "Use -c <file> to specify a config."
+  fi
+
+  if [[ -n "${BK_GEN_CRON:-}" ]]; then
+    fn_debug "Generation crontab jobs:"
+    bk_cmd_generate_cron
+    return 0
   fi
 
   # List actions.
@@ -41,7 +60,7 @@ bk_main() {
     bk_cmd_all_runnable_tasks
     if [[ ${#TASKS[@]} -eq 0 ]]; then
       fn_error "No tasks found to run!"
-      exit 1
+      return 2
     fi
   fi
 
@@ -49,12 +68,6 @@ bk_main() {
     fn_error "You must provide at least one action, or use -a"
     bk_cmd_print_help
     return 2
-  fi
-
-  if [[ -n "${BK_GEN_CRON:-}" ]]; then
-    fn_debug "Generation crontab jobs:"
-    bk_cmd_generate_cron
-    return 0
   fi
 
   # Execute each requested action (with deps).
@@ -79,12 +92,14 @@ bk_main() {
 # Usage: bk_parse_args "$@"
 bk_parse_args() {
   local opt
-  while getopts ":ac:e:dlhTC" opt; do
+  while getopts ":ac:e:D:k:dlhTC" opt; do
     case "$opt" in
       a) BK_ALL=1;;
       c) BK_CONFIG="$OPTARG";;
       C) BK_GEN_CRON=1;;
       e) BK_EMAIL="$OPTARG";;
+      D) BK_DECRYPT="$OPTARG";;
+      k) BK_DECRYPT_KEY="$OPTARG";;
       d) F_DEBUG=1;;
       l) BK_LIST=1;;
       T) BK_TEST_ENV=1;;

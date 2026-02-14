@@ -1,0 +1,16 @@
+.git
+.vscode
+config
+dist
+tests
+volumes
+.dockerignore
+.editorconfig
+.gitignore
+backupfire.sh
+dev.sh
+docker-compose.yml
+Dockerfile
+help.txt
+Makefile
+test.logs.sh

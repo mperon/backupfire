@@ -18,9 +18,6 @@ bk_type_backup() {
   fn_debug "[$task]      Task workdir: ${cfg[WorkDir]}"
   fn_debug "[$task] Task artifact dir: ${cfg[ArtifactDir]}"
 
-  declare -p CLEANUP
-  fn_wait
-
   # dispatch to Action.
   local action="${cfg[Action]:-copy}"
   case "${action,,}" in

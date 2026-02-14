@@ -39,7 +39,7 @@ fn_emit(){ # render
     fi
     # Log hook (optional)
     #__log $(printf "${prefix}${fmt/# /}" "$@")
-    printf "%s${fmt/# /}" "${prefix}" "$@"
+    printf "%s${fmt/# /}" "${prefix}" "$@" >&2
 }
 
 fn_msg(){ # Print a plain message.
