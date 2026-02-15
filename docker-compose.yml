@@ -9,9 +9,35 @@
 # Make sure you have:
 #   ./data/   (will store backups)
 #   ./config/ (put pubkey.pem and optionally .pgbackup.conf and rclone.conf)
-
 services:
-  db:
+  backupfire-app:
+    build:
+      context: .
+    container_name: backupfire-app
+    #environment:
+    volumes:
+      # Mount entire /srv from host into container
+      - ./volumes/data:/app/data
+      - ./config:/app/config:ro
+      # volumes to backup
+      - ./volumes/sources:/app/sources:ro
+      # Allow running docker CLI against host daemon (only if you need it)
+      - /var/run/docker.sock:/var/run/docker.sock
+    tmpfs:
+      - /tmp
+    # Run cron mode (your entrypoint uses this by default, but explicit is nice)
+    command: ["run", "-d", "-a"]
+    #command: ["cron"]
+    depends_on:
+      backupfire-db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backupfire-db:
     image: postgres:16-alpine
     container_name: backupfire-db
     environment:
@@ -27,39 +53,3 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-
-  # backupfire:
-  #   # Build your pgbackup image from the local Dockerfile
-  #   build:
-  #     context: .
-  #   container_name: backupfire-app
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-
-  #   # Mounts:
-  #   # - ./data   -> backups output
-  #   # - ./config -> config/key files (read-only)
-  #   volumes:
-  #     - ./volumes/data:/app/data
-  #     - ./volumes/config:/app/config:ro
-
-  #   environment:
-  #     # DB connection to the postgres service
-  #     DB_HOST: postgres
-  #     DB_USER: postgres
-  #     DB_NAME: postgres
-  #     DB_PASSWORD: postgres
-
-  #     # Backup destination inside container
-  #     BK_DEST: /app/data
-
-  #     # Optional: schedule inside container (uncomment to enable cron mode)
-  #     # BK_CRON: "*/5 * * * *"
-
-  #     # Optional: plain backup (no encryption)
-  #     # BK_PLAIN: "1"
-
-  #   # Default just runs once; override with:
-  #   #   docker compose -f docker-compose-dev.yml run --rm pgbackup run -x
-  #   command: ["test"]

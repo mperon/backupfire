@@ -1,11 +1,19 @@
 IMAGE_NAME ?= mperon/backupfire
-IMAGE_TAG ?= 2.0.1
+VERSION_FILE := ./VERSION
+VERSION = $(shell cat $(VERSION_FILE) | tr -d '\n' )
 CMD ?= cron
 
 .PHONY: build run db-up compose-run
 build:
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
-
+	@echo "BackupFire: Building image for version $(VERSION).."
+	docker pull "$(IMAGE_NAME):latest" || true
+	docker buildx build --platform linux/amd64 \
+		--cache-from "$(IMAGE_NAME):latest" \
+		-t "$(IMAGE_NAME):v$(VERSION)" \
+		-t "$(IMAGE_NAME):latest" \
+		.
+	docker -D --log-level=debug push "$(IMAGE_NAME):v$(VERSION)"
+	docker -D --log-level=debug push "$(IMAGE_NAME):latest"
 run:
 	-docker container stop pgbackup
 	-docker container rm pgbackup

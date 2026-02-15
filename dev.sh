@@ -13,16 +13,4 @@ set -o pipefail
 # Resolve script directory (safe when invoked via symlink).
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
-SRC_DIR="${SCRIPT_DIR}/src"
-
-# Collect files once (recursive), sorted for deterministic output
-# Works on macOS + Alpine
-mapfile -t files < <(find "$SRC_DIR" -type f -name '*.sh' -print | sort | uniq)
-
-# Append cleaned content
-for f in "${files[@]}"; do
-  source "$f"
-done
-
-# run main function
-bk_main "$@"
+source "$SCRIPT_DIR/backupfire.sh"

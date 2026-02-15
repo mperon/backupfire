@@ -17,6 +17,7 @@ SRC_DIR="${SCRIPT_DIR}/src"
 DEST_DIR="${SCRIPT_DIR}/dist"
 OUT_NAME="backupfire.sh"
 OUT_FILE="${DEST_DIR}/${OUT_NAME}"
+IFS= read -r SCRIPT_VERSION < "$SCRIPT_DIR/VERSION"
 
 # Ensure dirs exist
 rm -rf -- "$DEST_DIR"
@@ -58,7 +59,10 @@ SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 
 # Resolve script directory (safe when invoked via symlink).
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# VERSION
 EOF
+printf "%s\n" "SCRIPT_VERSION='$SCRIPT_VERSION'" >> "$OUT_FILE"
 
 # Collect files once (recursive), sorted for deterministic output
 # Works on macOS + Alpine

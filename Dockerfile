@@ -3,7 +3,7 @@
 ############################
 # 1) Build stage (minimal)
 ############################
-FROM alpine:3.20 AS build
+FROM alpine:3.23 AS build
 
 RUN apk add --no-cache bash findutils
 
@@ -20,7 +20,7 @@ RUN bash ./build.sh \
 ############################
 # 2) Runtime stage
 ############################
-FROM alpine:3.20
+FROM alpine:3.23
 
 RUN apk add --no-cache \
   bash \
@@ -29,13 +29,15 @@ RUN apk add --no-cache \
   openssh-client \
   rclone \
   perl \
+  rsync \
   ca-certificates \
   dcron \
   coreutils \
   gzip \
   tar \
   findutils \
-  su-exec
+  tini \
+  docker-cli
 
 ARG PG_UID=10001
 ARG PG_GID=10001
@@ -72,7 +74,7 @@ RUN chmod 755 /app/backupfire.sh /app/docker-entrypoint.sh \
 
 VOLUME ["/app/data", "/app/config"]
 
-USER backup
+#USER backup
 
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini", "--", "/app/docker-entrypoint.sh"]
 CMD ["cron"]

@@ -33,7 +33,7 @@ bk_main() {
   # load config
   if ! bk_resolve_config; then
     fn_error "Config file not found or not readable."
-    die "Use -c <file> to specify a config."
+    fn_die "Use -c <file> to specify a config."
   fi
 
   if [[ -n "${BK_GEN_CRON:-}" ]]; then

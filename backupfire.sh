@@ -16,6 +16,8 @@ SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 # Resolve script directory (safe when invoked via symlink).
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
+IFS= read -r SCRIPT_VERSION < "$SCRIPT_DIR/VERSION"
+
 SRC_DIR="${SCRIPT_DIR}/src"
 
 # Collect files once (recursive), sorted for deterministic output

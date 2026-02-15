@@ -4,8 +4,6 @@
 # ---------------------------
 # Constants / defaults
 # ---------------------------
-SCRIPT_VERSION="2.0.1"
-
 # Default config search locations.
 CFG_DEFAULT_NAME="default.conf"
 CFG_DIRS=("$SCRIPT_DIR/config" "$HOME/config/" "/etc/backupfire")

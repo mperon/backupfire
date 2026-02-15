@@ -6,6 +6,6 @@
 # Test Environment
 # ---------------------------
 bk_cmd_test_env() {
-  die "this command is not implemented yet"
+  fn_die "this command is not implemented yet"
   return 0
 }

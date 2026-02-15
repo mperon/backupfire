@@ -81,9 +81,11 @@ bk_format_timestamp() {
 
 # run docker command
 bk_util_docker_run() {
-  local sock="${cfg[DockerSocket]:-/var/run/docker.sock}"
+  local sock="${cfg[DockerSocket]:-}"
 
-  ${DOCKER_CMD} -H "unix://$sock" "$@"
+  [[ -z "$sock" ]] &&  \
+    ${DOCKER_CMD} -H "unix://$sock" "$@" || \
+    ${DOCKER_CMD} "$@"
 }
 
 

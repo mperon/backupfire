@@ -9,10 +9,10 @@ log() { printf '%s\n' "$*" >&2; }
 mkdir -p /app/run "$BK_DEST" "$BK_CONFIG_DIR"
 
 generate_and_install_cron() {
-  local cronfile="${BK_CRONFILE:?BK_CRONFILE is not set}"
+  local cronfile="${BK_CRONFILE:-/app/rubackupfire.crontab}"
 
   log "Generating crontab to: $cronfile"
-  if ! /app/backupfire.sh -c "$cfg" -C >"$cronfile"; then
+  if ! /app/backupfire.sh -C >"$cronfile"; then
     rc=$?
     log "ERROR: backupfire.sh -C failed (exit=$rc). Not starting cron."
     exit "$rc"

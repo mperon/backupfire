@@ -9,7 +9,7 @@ bk_action_dockerlogs() {
   if ! bk_action_dockerlogs_check; then
     fn_error "Was not possible to connect with docker";
     fn_error "Check if the docker socket is avaliable and configure"
-    fn_error "with DockerSocket=  "
+    fn_error "with DockerSocket=${cfg[DockerSocket]:-/var/run/docker.sock}"
     return 1
   fi
 
@@ -58,7 +58,7 @@ bk_action_dockerlogs_each() {
     # verifica se alguma query bate
     for s in "${filters[@]}"; do
       s="${s//[[:space:]]/}"; s="${s,,}"; query="$s"
-      if [[-z "$query" ]] || [[ "${query// /}" == "all" ]] || [[ *"${query// /}"* == "$name" ]]; then
+      if [[ -z "$query" ]] || [[ "${query// /}" == "all" ]] || [[ *"${query// /}"* == "$name" ]]; then
         fn_debug "Backuping up logs from $name"
         $action "$cid" "$name" "$@"
         break
