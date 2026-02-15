@@ -4,8 +4,8 @@
 
 bk_type_backup_remote() {
   local task="$1" workdir="$2" artifactdir="$3"
-  local -a cmd=()
-
+  local -a cmd=() remotes=()
+  local up_success=0
   # ignore upload if not set
   if [[ -z "${cfg[Remote]:-}" ]]; then
     return 0
@@ -40,8 +40,33 @@ bk_type_backup_remote() {
 
   # add source and destination
   # source will be to (local) and remote will get the remote dest
-  cmd+=("${cfg[To]}" "${cfg[Remote]}")
+  cmd+=("${cfg[To]}")
 
-  #execute
-  fn_run "${cmd[@]}"
+  #split remote to a list of remotes:
+  IFS=',' read -r -a remotes <<< "${cfg[Remote]}"
+  for remote in "${remotes[@]}"; do
+    remote=$(fn_trim "$remote")
+
+    if [[ -z "$remote" ]]; then
+      fn_error "Remote path is empty, cannot upload"
+      return 2
+    fi
+
+    fn_debug "Uploading to remote: $remote ..."
+    if ! bk_type_backup_remote_run cmd "$remote"; then
+      fn_error "Was not possible to upload to the remote $remote.."
+      continue
+    fi
+    ((++$up_success))
+  done
+
+  # if none was succeeded, return false
+  (( $up_success > 0 )) && return 0 || return 1
+}
+
+
+bk_type_backup_remote_run() {
+  local -n _cmd=$1
+  local remote="$2"
+  fn_run "${_cmd[@]}" "$remote"
 }
