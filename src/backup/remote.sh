@@ -23,8 +23,9 @@ bk_type_backup_remote() {
   #add default options
   if fn_boolean "${cfg[RemoteDefaultOpts]:-}"; then
     (( $F_DEBUG )) || cmd+=("--quiet")
-    cmd+=("--auto-confirm" "--fast-list" "--retries" "3")
-    cmd+=("--exclude" "'.*'" "--retries-sleep" "1m" "--timeout" "1m")
+    cmd+=("--auto-confirm" "--fast-list" "--retries" "5")
+    cmd+=("--low-level-retries" "10" "--contimeout" "30s")
+    cmd+=("--exclude" "'.*'" "--retries-sleep" "2m" "--timeout" "10m")
     cmd+=("--update")
   fi
 
@@ -58,11 +59,11 @@ bk_type_backup_remote() {
       fn_error "Was not possible to upload to the remote $remote.."
       continue
     fi
-    ((++$up_success))
+    (( up_success++ ))
   done
 
   # if none was succeeded, return false
-  (( $up_success > 0 )) && return 0 || return 1
+  (( up_success > 0 )) && return 0 || return 1
 }
 
 

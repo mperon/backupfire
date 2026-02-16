@@ -95,9 +95,13 @@ bk_cmd_crontab_gen_line() {
     cmd+=("${tasks[@]}")
   fi
 
+  # rediredt output
+  local output='>>/proc/1/fd/1 2>>/proc/1/fd/2'
+
   # now print to sdout
   printf '%s\t%s\t%s\t%s\t%s\t' \
     "${minute:-*}" "${hour:-*}" "${monthday:-*}" "${month:-*}" "${weekday:-*}"
   printf '%q ' "${cmd[@]}"
+  printf '%s ' "$output"
   printf '\n'
 }

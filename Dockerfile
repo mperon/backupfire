@@ -11,6 +11,7 @@ WORKDIR /src
 
 # Copy only what build.sh needs
 COPY build.sh ./build.sh
+COPY VERSION VERSION
 COPY src/ ./src/
 
 # Build dist/backupfire.sh
