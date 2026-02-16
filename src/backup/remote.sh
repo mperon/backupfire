@@ -4,7 +4,7 @@
 
 bk_type_backup_remote() {
   local task="$1" workdir="$2" artifactdir="$3"
-  local -a cmd=() remotes=()
+  local -a cmd=() remotes=() quiet="--quiet"
   local up_success=0
   # ignore upload if not set
   if [[ -z "${cfg[Remote]:-}" ]]; then
@@ -22,7 +22,8 @@ bk_type_backup_remote() {
 
   #add default options
   if fn_boolean "${cfg[RemoteDefaultOpts]:-}"; then
-    cmd+=("--auto-confirm" "--fast-list" "--quiet" "--retries" "3")
+    (( $F_DEBUG )) || cmd+=("--quiet")
+    cmd+=("--auto-confirm" "--fast-list" "--retries" "3")
     cmd+=("--exclude" "'.*'" "--retries-sleep" "1m" "--timeout" "1m")
     cmd+=("--update")
   fi

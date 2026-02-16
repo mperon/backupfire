@@ -248,26 +248,33 @@ fn_dir_in() {
 #   fn_cmdline_to_array cmd "echo 'hello world'"
 #   printf '%q\n' "${cmd[@]}"
 fn_cmdline_to_array() {
+  [[ -n "${BASH_VERSION:-}" ]] || {
+    printf 'fn_cmdline_to_array: must run under bash (not sh/ash)\n' >&2
+    return 2
+  }
+  (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) )) || {
+    printf 'fn_cmdline_to_array: bash 4.3+ required for namerefs\n' >&2
+    return 2
+  }
+
   local out_name="${1:-}" str="${2:-}"
   [[ $out_name =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
     || { printf 'fn_cmdline_to_array: bad out var name: %q\n' "$out_name" >&2; return 2; }
 
-  local -n toCmdArray="$out_name"   # <- writes into caller's array
+  local -n toCmdArray="$out_name"
   toCmdArray=()
 
-  # Normalize consecutive quotes.
-  str="$(printf '%s' "$str" | sed -Ee 's/[\"]+/"/g' -e "s/[']+/'/g")"
+  # (Optional) avoid sed portability issues on BusyBox:
+  str="${str//\"\"/\"}"
+  str="${str//\'\'/\'}"
 
+  local i char prev quote token
   for ((i=0; i<${#str}; i++)); do
     char="${str:i:1}"
 
     if [[ "$char" == '"' || "$char" == "'" ]]; then
       if [[ "$prev" != '\\' ]]; then
-        if [[ "$quote" == "$char" ]]; then
-          quote=""
-        else
-          quote="$char"
-        fi
+        if [[ "$quote" == "$char" ]]; then quote=""; else quote="$char"; fi
         prev="$char"
         continue
       fi
