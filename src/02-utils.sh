@@ -14,7 +14,7 @@ fn_run() {
     "$@"
   else
     #ignore output
-    "$@" >/dev/null 2>&1
+    "$@" 2>/dev/null
   fi
 }
 
