@@ -81,24 +81,42 @@ bk_task_run_tree() {
 
   # Run the task itself.
   fn_info "Running task: $task"
+  bk_task_run "$task"
+}
+
+bk_task_run() {
+  local task="$1"
+
   CURRENT_TASK="$task"
-  if bk_task_run "$task"; then
+
+  # load task config:
+  bk_task_load_cfg "$task"
+
+  # use a erorfile to be able to notify error:
+  bk_mktemp_set 'cfg[ErrorFile]' "$task" "errfile"
+
+  bk_task_run_internal "$task" 2> >(tee "${cfg[ErrorFile]}" >&2)
+  local ret=$?
+  wait  # ensures tee finishes writing before reading the file
+
+  if [[ $ret -eq 0 ]]; then
     RUN_SET["$task"]=1
+    # success
     fn_success "$C_RESET" "Task " "$C_BOLD" "$task" "$C_RESET" " was successfull completed."
-    return 0
+    fn_notify "$task" "success"
+  else
+    ERR_SET["$task"]=1
+    fn_failed "$C_RESET" "Task " "$C_BOLD" "$task" "$C_RESET" " failed to complete."
+    fn_notify "$task" "failed"
   fi
   CURRENT_TASK=
-  fn_failed "$C_RESET" "Task " "$C_BOLD" "$task" "$C_RESET" " failed to complete."
-  ERR_SET["$task"]=1
-  return 1
+  return $ret
 }
 
 # bk_run_task: load an task config, validate it, and dispatch by Type.
 # Usage: bk_run_task <task>
-bk_task_run() {
+bk_task_run_internal() {
   local task="$1"
-
-  bk_task_load_cfg "$task"
 
   if [[ ${#cfg[@]} -eq 0 ]]; then
     fn_error "Task [$task] not found in config."

@@ -66,7 +66,7 @@ bk_util_cp() {
 # ensure timestamp is set
 bk_utils_set_timestamp() {
   [[ -z "${cfg[Timestamp]:-}" ]] && {
-    ts="$(date +"${cfg[DateFormat]-%Y%m%d%H%M%S}")" || return 1
+    local ts="$(date +"${cfg[DateFormat]-%Y%m%d%H%M%S}")" || return 1
     cfg[Timestamp]="$(date +%s)"
     cfg[DateStr]="$ts"
   }
@@ -83,9 +83,11 @@ bk_format_timestamp() {
 bk_util_docker_run() {
   local sock="${cfg[DockerSocket]:-}"
 
-  [[ -z "$sock" ]] &&  \
-    ${DOCKER_CMD} -H "unix://$sock" "$@" || \
+  if [[ -n "$sock" ]]; then
+    ${DOCKER_CMD} -H "unix://$sock" "$@"
+  else
     ${DOCKER_CMD} "$@"
+  fi
 }
 
 

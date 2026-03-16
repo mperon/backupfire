@@ -69,9 +69,8 @@ bk_action_postgres_run() {
 
 bk_action_postgres() {
   local task="$1" workdir="$2" artifactdir="$3"
-  local -a opts=("--format=directory" "--jobs=4" "--compress=0" --no-owner --no-privileges --blobs)
+  local -a opts=("--jobs=4" "--compress=0" --no-owner --no-privileges --blobs)
   local file_ext="${cfg[DbFileExtension]:-}" file_name=
-  local -a cmd=()
 
   # test connection
   if ! bk_action_postgres_run "${POSTGRES_CHECK_CMD}" -c 'SELECT 1;' -tA; then
@@ -84,11 +83,16 @@ bk_action_postgres() {
     fn_cmdline_to_array opts "${cfg[DbBackupOpts]:-}"
   fi
 
-  [[ -n "$file_ext" ]] && file_name="$(bk_build_artifact_name)${file_ext}"
-
   # connection is ok! run backup
-  bk_action_postgres_run "${POSTGRES_CMD}" "${opts[@]}" \
+  if [[ -n "$file_ext" ]]; then
+    file_name="$(bk_build_artifact_name)${file_ext}"
+    bk_action_postgres_run "${POSTGRES_CMD}" "--format=custom" "${opts[@]}" \
     --file="$workdir/$file_name"
+  else
+    bk_action_postgres_run "${POSTGRES_CMD}" "--format=directory" "${opts[@]}" \
+    --file="$workdir/"
+  fi
+
 
   # check command return
   if [[ $? -ne 0 ]]; then

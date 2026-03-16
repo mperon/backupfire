@@ -25,10 +25,10 @@ bk_type_backup_movefiles() {
 
   case "$struct" in
     none)
-      bk_type_backup_movefiles_none "$task" "$w_dir" "$a_dir"
+      bk_type_backup_movefiles_none "$task" "$workdir" "$artifactdir"
       ;;
     tree)
-      bk_type_backup_movefiles_tree "$task" "$w_dir" "$a_dir"
+      bk_type_backup_movefiles_tree "$task" "$workdir" "$artifactdir"
       ;;
     *)
       fn_error "[$task] Unsupported BackupStructure format: $struct"
@@ -40,7 +40,7 @@ bk_type_backup_movefiles() {
 }
 
 bk_type_backup_movefiles_tree() {
-  local task="$1" workdir="$2" artifactdir="$3" to= group=
+  local task="$1" workdir="$2" artifactdir="$3" group=
 
   local groups=("yearly" "monthly" "weekly" "daily")
   local now=$(date +"%Y-%m-%d")
@@ -51,10 +51,10 @@ bk_type_backup_movefiles_tree() {
     [[ ! -d "${cfg[To]}/$group" ]] && mkdir -p "${cfg[To]}/$group" || true
     case "$group" in
       yearly)
-        [[ "$now" != *"-01-01" ]] && continue #only first day of the year
+        [[ "$now" != ????-01-01 ]] && continue #only first day of the year
         ;;
       monthly)
-        [[ "$now" != *"-01" ]] && continue #only first day of the month
+        [[ "$now" != ????-??-01 ]] && continue #only first day of the month
         ;;
       weekly)
         [[ "$week" != "1" ]] && continue # only mondays
@@ -63,7 +63,7 @@ bk_type_backup_movefiles_tree() {
     [[ ! -d "${cfg[To]}/$group" ]] \
       && { fn_error "Task destination is not a valid directory: ${cfg[To]}/$group"; return 1; }
 
-    to="${cfg[To]}/$group/${cfg[ArtifactName]}"
+    local to="${cfg[To]}/$group/${cfg[ArtifactName]}"
     bk_util_cp "${cfg[Artifact]}" "$to"
 
     [[ ! -f "$to" ]] \
@@ -77,7 +77,7 @@ bk_type_backup_movefiles_none() {
   local task="$1" workdir="$2" artifactdir="$3"
 
   # just copy the file to final destination
-  to="${cfg[To]}/${cfg[ArtifactName]}"
+  local to="${cfg[To]}/${cfg[ArtifactName]}"
   bk_util_cp "${cfg[Artifact]}" "$to"
 
   [[ ! -f "$to" ]] \

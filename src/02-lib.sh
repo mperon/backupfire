@@ -71,7 +71,7 @@ fn_failed() {
 }
 
 fn_die(){ # Print an error and exit.
-    error "$@"; exit 1
+    fn_error "$@"; exit 1
 }
 
 fn_debug() { # show only in debug mode
@@ -404,7 +404,7 @@ fn_ini_get() {
 fn_ini_load_sections() {
   local -n _out="$1"
   local file="$2" sections_csv="$3"
-  local sec line key val
+  local sec line key val _insec=
 
   _out=()
 

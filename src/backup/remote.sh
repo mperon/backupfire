@@ -4,7 +4,7 @@
 
 bk_type_backup_remote() {
   local task="$1" workdir="$2" artifactdir="$3"
-  local -a cmd=() remotes=() quiet="--quiet"
+  local -a cmd=() remotes=()
   local up_success=0
   # ignore upload if not set
   if [[ -z "${cfg[Remote]:-}" ]]; then

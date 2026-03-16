@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # Hooks
-set -o pipefail
 
 # ---------------------------
 # Hook (Before/After) execution
@@ -47,7 +46,7 @@ bk_hook_run() {
 
   # Resolve hook command.
   local cmd="${cmdArr[0]}"
-  if [[ -x "$cmd" && -f "f$cmd" ]]; then
+  if [[ -x "$cmd" && -f "$cmd" ]]; then
     : # external executable
   else
     case "$cmd" in

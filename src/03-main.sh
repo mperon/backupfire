@@ -21,7 +21,7 @@ bk_main() {
   if [[ -n "${BK_DECRYPT}" ]]; then
     if [[ -n "$BK_LIST" ]] || [[ -n "$BK_TEST_ENV" ]] || \
       [[ -n "$BK_ALL" ]] || [[ -n "$BK_GEN_CRON" ]] || \
-      [[ "${#TASKS[@]}" -gt 0 ]] || [[ -n "$BK_GEN_CRON" ]]; then
+      [[ "${#TASKS[@]}" -gt 0 ]]; then
       fn_error "You cant pass other arguments to -D except the path"
       return 2
     fi

@@ -26,7 +26,7 @@ bk_add_rsync_filters() {
   # Explicit filter file.
   if [[ -n "${cfg[${pref}FilterFrom]:-}" ]]; then
     if [[ -r "${cfg[${pref}FilterFrom]}" ]]; then
-      _cmd_ref+=("--filter=merge ${cfg[FilterFrom]}")
+      _cmd_ref+=("--filter=merge ${cfg[${pref}FilterFrom]}")
     else
       fn_error "[${cfg[Name]}] ${pref}FilterFrom not readable: ${cfg[${pref}FilterFrom]}"
       return 1
@@ -82,7 +82,7 @@ bk_add_rclone_filters() {
 
   if [[ -n "${cfg[${pref}FilterFrom]:-}" ]]; then
     [[ -r "${cfg[${pref}FilterFrom]}" ]] || { fn_error "${pref}FilterFrom not readable: ${cfg[${pref}FilterFrom]}"; return 1; }
-    _cmd_ref+=("--filter-from=${cfg[FilterFrom]}")
+    _cmd_ref+=("--filter-from=${cfg[${pref}FilterFrom]}")
   fi
   if [[ -n "${cfg[${pref}IncludeFrom]:-}" ]]; then
     [[ -r "${cfg[${pref}IncludeFrom]}" ]] || { fn_error "${pref}IncludeFrom not readable: ${cfg[${pref}IncludeFrom]}"; return 1; }

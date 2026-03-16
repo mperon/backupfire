@@ -18,6 +18,14 @@ bk_type_backup() {
   fn_debug "[$task]      Task workdir: ${cfg[WorkDir]}"
   fn_debug "[$task] Task artifact dir: ${cfg[ArtifactDir]}"
 
+  #check if To is a temporary directory:
+  if [[ "${cfg[To]}" == tmp:* ]]; then
+    cfg[OriginalTo]="${cfg[To]}"
+    bk_mktemp_set 'cfg[To]' "$task" "to"
+    fn_debug "Using a temporary dest! It will be deleted at end of the execution:"
+    fn_debug "${cfg[To]}"
+  fi
+
   # dispatch to Action.
   local action="${cfg[Action]:-copy}"
   case "${action,,}" in
@@ -43,14 +51,6 @@ bk_type_backup() {
   if [[ "$ret" -ne 0 ]]; then
     fn_error "[$task] Action ($action) execution failed with code $ret"
     return "$ret"
-  fi
-
-  #check if To is a temporary directory:
-  if [[ "${cfg[To]}" == tmp:* ]]; then
-    cfg[OriginalTo]="${cfg[To]}"
-    bk_mktemp_set 'cfg[To]' "$task" "to"
-    fn_debug "Using a temporary dest! It will be deleted at end of the execution:"
-    fn_debug "${cfg[To]}"
   fi
 
   # action was executed, now compression

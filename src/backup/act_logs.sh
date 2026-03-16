@@ -58,9 +58,9 @@ bk_action_dockerlogs_each() {
     # verifica se alguma query bate
     for s in "${filters[@]}"; do
       s="${s//[[:space:]]/}"; s="${s,,}"; query="$s"
-      if [[ -z "$query" ]] || [[ "${query// /}" == "all" ]] || [[ *"${query// /}"* == "$name" ]]; then
+      if [[ -z "$query" ]] || [[ "${query// /}" == "all" ]] || [[ "$name" == *"${query// /}"* ]]; then
         fn_debug "Backuping up logs from $name"
-        $action "$cid" "$name" "$@"
+        "$action" "$cid" "$name" "$@"
         break
       fi
     done

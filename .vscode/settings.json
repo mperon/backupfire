@@ -3,6 +3,14 @@
         "terminalCursor.foreground": "#00ffaa",
         "activityBar.background": "#0F332E",
         "titleBar.activeBackground": "#164840",
-        "titleBar.activeForeground": "#F5FCFB"
+        "titleBar.activeForeground": "#F5FCFB",
+        "titleBar.inactiveBackground": "#0F332E",
+        "titleBar.inactiveForeground": "#F5FCFB",
+        "statusBar.background": "#0F332E",
+        "statusBar.foreground": "#F5FCFB",
+        "statusBar.debuggingBackground": "#0F332E",
+        "statusBar.debuggingForeground": "#F5FCFB",
+        "statusBar.noFolderBackground": "#0F332E",
+        "statusBar.noFolderForeground": "#F5FCFB"
     }
 }

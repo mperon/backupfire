@@ -9,6 +9,9 @@ bk_cmd_decrypt() {
   local path="$BK_DECRYPT" tmpd= encf= keyf=
   local file_name= out_file=
 
+  # create a temporary directory
+  bk_mktemp_set 'tmpd' "decrypt" "d" "dir"
+
   # check if file exists and is readable
   if [[ -z "$path" ]] || [[ ! -f "$path" ]] || \
     [[ ! -r "$path" ]]; then
@@ -18,16 +21,13 @@ bk_cmd_decrypt() {
 
   # search for a valid private key file
   fn_debug "Searching for a valid private key: "
-  if ! bk_encrypt_set_private_key "$1" "$tmpd"; then
+  if ! bk_encrypt_set_private_key "$BK_DECRYPT_KEY" "$tmpd"; then
     fn_error "You don't have a private key (id_rsa) in your system or " \
     "you passed an invalid private key (with -k)"
     return 2
   fi
 
   fn_debug "Private key found: $BK_DECRYPT_KEY_PEM"
-
-  # create a temporary directory
-  bk_mktemp_set 'tmpd' "decrypt" "d" "dir"
 
   fn_debug "Creating temporary directory: $tmpd"
 

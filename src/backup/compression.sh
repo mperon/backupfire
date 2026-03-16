@@ -10,7 +10,7 @@ bk_type_backup_compression() {
   local compress file_name out_file ext
 
   # default Compression=tar (cannot exist Backup without compression).
-  compress="${cfg[Compression]-tar}"
+  compress="${cfg[Compression]:-tar}"
   file_name="$(bk_build_artifact_name)"
 
   fn_debug "Packing workdir in: $compress"

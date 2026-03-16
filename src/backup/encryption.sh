@@ -16,7 +16,7 @@ bk_type_backup_encryption() {
     return 0
   }
 
-  if ! bk_backup_encryption_checks; then
+  if ! bk_backup_encryption_checks "$task"; then
     return 1
   fi
 
@@ -67,7 +67,7 @@ bk_type_backup_encryption() {
 }
 
 bk_backup_encryption_checks() {
-  local tempk= firstline= encd=
+  local task="$1" tempk= firstline= encd=
   bk_mktemp_set 'encd' "$task" "encd"
   local keyf="$encd/keyfile"  sshk="$encd/ssh-temp"
 
