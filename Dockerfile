@@ -38,7 +38,8 @@ RUN apk add --no-cache \
   tar \
   findutils \
   tini \
-  docker-cli
+  docker-cli \
+  curl
 
 ARG PG_UID=10001
 ARG PG_GID=10001

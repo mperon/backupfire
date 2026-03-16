@@ -59,7 +59,7 @@ fn_notify() {
 
 
   # check if notify telegram is on
-  if fn_boolean "${cfg[NotifyTelegram]}"; then
+  if fn_boolean "${cfg[NotifyTelegram]:-False}"; then
       fn_debug "[notify] telegram: sending $type notification"
       fn_notify_telegram "$task" "$type" "$status"
   else
@@ -67,7 +67,7 @@ fn_notify() {
   fi
 
   # check if notify email is on
-  if fn_boolean "${cfg[NotifyEmail]}"; then
+  if fn_boolean "${cfg[NotifyEmail]:-False}"; then
     fn_debug "[notify] email: sending $type notification"
     fn_notify_email "$task" "$type" "$status"
   else
@@ -269,11 +269,11 @@ fn_email_send_curl() {
 fn_email_send() {
   local subject="$1" body="$2" errfile="${3:-}"
 
-  local email_to="${cfg[NotifyEmailTo]}"
-  local email_from="${cfg[EmailFrom]}"
-  local email_smtp="${cfg[EmailSmtp]}"
-  local email_user="${cfg[EmailUser]}"
-  local email_pass="${cfg[EmailPass]}"
+  local email_to="${cfg[NotifyEmailTo]:-$BK_EMAIL_TO}"
+  local email_from="${cfg[EmailFrom]:-$BK_EMAIL_FROM}"
+  local email_smtp="${cfg[EmailSmtp]:-$BK_EMAIL_SMTP}"
+  local email_user="${cfg[EmailUser]:-$BK_EMAIL_USER}"
+  local email_pass="${cfg[EmailPass]:-$BK_EMAIL_PASS}"
 
   if [[ -z "$email_to" ]];   then fn_debug "[email] EmailTo is not set — skipping."; return 0; fi
   if [[ -z "$email_smtp" ]]; then fn_warn "[email] EmailSmtp is not set — skipping."; return 1; fi

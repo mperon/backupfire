@@ -29,3 +29,8 @@ db-up:
 
 compose-run:
 	docker compose -f docker-compose-dev.yml up -d pgbackup
+
+.PHONY: run-test
+
+run-test:
+	docker compose up --build --force-recreate --no-deps --remove-orphans

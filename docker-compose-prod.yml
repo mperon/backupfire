@@ -3,7 +3,8 @@ services:
     image: mperon/backupfire:latest
     container_name: backupfire
     restart: unless-stopped
-    #environment:
+    env_file:
+      - .env
     volumes:
       # Mount entire /srv from host into container
       - /srv/volumes/backupfire/data:/app/data
