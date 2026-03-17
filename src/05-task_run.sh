@@ -93,7 +93,7 @@ bk_task_run() {
   bk_task_load_cfg "$task"
 
   # use a erorfile to be able to notify error:
-  bk_mktemp_set 'cfg[ErrorFile]' "$task" "errfile"
+  bk_mktemp_set 'cfg[ErrorFile]' "$task" "errfile" "file"
 
   bk_task_run_internal "$task" 2> >(tee "${cfg[ErrorFile]}" >&2)
   local ret=$?
