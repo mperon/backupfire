@@ -12,7 +12,7 @@ bk_hook_run() {
 
   for i in "" $(seq 1 9); do
     key="${moment}${i}"
-    value="${cfg[${!key}]:-}"
+    value="${cfg[${key}]:-}"
     value="${value// /}"
     if [[ -n "${value}" ]]; then
       if ! bk_hook_run_internal "$key"; then
