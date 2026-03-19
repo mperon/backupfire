@@ -6,6 +6,23 @@
 # Hook (Before/After) execution
 # ---------------------------
 
+# allow to run multiple hooks like: After, After1 ..
+bk_hook_run() {
+  local moment="$1"
+
+  for i in "" $(seq 1 9); do
+    key="${moment}${i}"
+    value="${cfg[${!key}]:-}"
+    value="${value// /}"
+    if [[ -n "${value}" ]]; then
+      if ! bk_hook_run_internal "$key"; then
+        return 1
+      fi
+    fi
+  done
+  return 0
+}
+
 # bk_hook_run: run Before/After commands from config.
 #
 # Supports:
@@ -14,7 +31,7 @@
 #
 # The config string can use placeholders like %From%, %To%, %Name%, etc.
 # Usage: bk_hook_run Before|After
-bk_hook_run() {
+bk_hook_run_internal() {
   local moment="$1"
   local hook_str=""
   hook_str="${cfg[$moment]:-}"
@@ -24,7 +41,7 @@ bk_hook_run() {
   fn_debug "Running $moment Hook:" "$hook_str"
 
   # Do not allow calling private functions by prefix (basic guard).
-  if [[ "${hook_str:0:3}" == "fn_" ]]; then
+  if [[ "${hook_str:0:3}" == "fn_" ||  "${hook_str:0:3}" == "bk_" ]]; then
     fn_error "[${cfg[Name]}][$moment] Hook cannot execute private function-like names: $hook_str"
     return 1
   fi

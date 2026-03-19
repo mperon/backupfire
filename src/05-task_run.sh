@@ -135,7 +135,7 @@ bk_task_run_internal() {
   fi
 
   bk_hook_run "Before" || {
-    fn_debug "[$task] Before hook failed; aborting action."
+    fn_error "[$task] Before hook failed; aborting action."
     return 1
   }
 
@@ -152,12 +152,12 @@ bk_task_run_internal() {
   esac
   local ret=$?
   if [[ "$ret" -ne 0 ]]; then
-    fn_error "[$task] Type execution failed with code $ret"
+    fn_error "[$task] Type ${cfg[Type]:-} execution failed with code $ret"
     return "$ret"
   fi
 
   bk_hook_run "After" || {
-    fn_debug "[$task] After hook failed."
+    fn_error "[$task] After hook failed."
     return 1
   }
 
