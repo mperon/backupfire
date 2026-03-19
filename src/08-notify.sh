@@ -19,11 +19,6 @@ fn_err_message() {
   local status="$1" errfile="${2:-}"  task="${3:-$CURRENT_TASK}"
   local _date="$(date +'%Y-%m-%d %H:%M:%S')"
 
-  local errors=""
-  if [[ -n "$errfile" ]] && [[ -s "$errfile" ]]; then
-    errors="$(fn_strip_ansi < "$errfile" | head -n 5)"
-  fi
-
   cat <<EOF
 backupfire: ${status}
 
@@ -33,11 +28,6 @@ Host:     ${BK_HOSTNAME}
 Date:     ${_date}
 Config:   ${BK_CONFIG}
 EOF
-  if [[ -n "$errors" ]]; then
-    echo ""
-    echo "Errors:"
-    echo "$errors"
-  fi
 }
 
 fn_notify() {
@@ -107,12 +97,16 @@ fn_notify_send_doc() {
   shift 2
   local line_count=0 clean_file=
 
+  fn_debug "Sending File $errfile"
+
   if [[ -n "$errfile" ]] && [[ -s "$errfile" ]]; then
     line_count="$(fn_strip_ansi < "$errfile" | grep -vc '^[[:space:]]*$')"
   fi
 
   if [[ "$line_count" -gt 5 ]]; then
-    clean_file="$(bk_mktemp -t backupfire.tgdoc.XXXXXX)"
+    local timestamp="$(date +%Y%m%d_%H%M%S)"
+    clean_file_dir="$(bk_mktemp -t backupfire.tgdoc.XXXXXX -d)"
+    clean_file="$clean_file_dir/${CURRENT_TASK,,}_${timestamp}.log"
     fn_strip_ansi < "$errfile" > "$clean_file"
     "$command" "$clean_file" "$@"
     return $?
@@ -136,17 +130,17 @@ fn_telegram_check() {
 fn_telegram_curl() {
   local endpoint="$1"; shift
   local tg_token="${cfg[TelegramToken]:-$TELEGRAM_BOT_TOKEN}"
-  local tg_chat_id="${cfg[TelegramChatId]:-$TELEGRAM_CHAT_ID}"
   local api_url="https://api.telegram.org/bot${tg_token}/${endpoint}"
+  local tmp_response=
 
-  local response http_code
-  response=$(curl -fsSL --max-time 30 \
-    -w "\n%{http_code}" \
+#  bk_mktemp_set 'tmp_response' "$task" "tg_resp" "file"
+
+  local http_code
+  http_code=$(curl -sSL --max-time 30 \
+    -o /dev/null \
+    -w "%{http_code}" \
     -X POST "$api_url" \
-    -d "chat_id=${tg_chat_id}" \
-    "$@" 2>&1)
-
-  http_code="$(printf '%s' "$response" | tail -n1)"
+    "$@" 2>/dev/null)
 
   if [[ "$http_code" == "200" ]]; then
     fn_debug "[telegram] Request succeeded (HTTP 200)."
@@ -160,6 +154,7 @@ fn_telegram_curl() {
 fn_telegram_send() {
   local message="${1:-}"
   local parse_mode="${2:-Markdown}"
+  local tg_chat_id="${cfg[TelegramChatId]:-$TELEGRAM_CHAT_ID}"
 
   if [[ -z "$message" ]]; then fn_warn "[telegram] empty message — skipping."; return 1; fi
   fn_telegram_check || return 1
@@ -167,6 +162,7 @@ fn_telegram_send() {
   fn_debug "[telegram] Sending message..."
   fn_telegram_curl "sendMessage" \
     --data-urlencode "text=${message}" \
+    -d "chat_id=${tg_chat_id}" \
     -d "parse_mode=${parse_mode}" \
     -d "disable_web_page_preview=true"
 }
@@ -174,6 +170,7 @@ fn_telegram_send() {
 fn_telegram_send_document() {
   local filepath="$1"
   local caption="$2"
+  local tg_chat_id="${cfg[TelegramChatId]:-$TELEGRAM_CHAT_ID}"
   caption="${caption:0:1000}" #telegram limit
 
   if [[ ! -f "$filepath" ]]; then fn_warn "[telegram] file not found: $filepath — skipping."; return 1; fi
@@ -183,6 +180,7 @@ fn_telegram_send_document() {
   fn_debug "[telegram] Sending document: $filepath"
   fn_telegram_curl "sendDocument" \
     -F "caption=${caption}" \
+    -F "chat_id=${tg_chat_id}" \
     -F "document=@${filepath}"
 }
 
