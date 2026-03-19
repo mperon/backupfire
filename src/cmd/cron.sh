@@ -27,7 +27,7 @@ EOF
   printf "\n%s\n" "# Crontab of section [General]"
   # read crontab of general
   cronstr="$(fn_ini_get "${cfg_file}" "General" "CronJob")"
-  [[ -n "$cronstr" ]] && bk_cmd_crontab_gen_line "$cronstr" "-a"
+  [[ -n "$cronstr" ]] && bk_cmd_crontab_gen_line "$cronstr" "General"
 
   # Read all sections of an ini file and generate cron file
   while IFS= read -r sec; do
@@ -37,7 +37,7 @@ EOF
 
     # for each section read CronJob if it has:
     cronstr="$(fn_ini_get "${cfg_file}" "${sec}" "CronJob")"
-    [[ -z "$cronstr" ]] && continue
+    [[ -z "${cronstr// /}" ]] && continue
 
     # generating crontab of section
     printf "%s\n" "# Crontab of section [$sec]"
@@ -50,19 +50,29 @@ EOF
   (( ${#cron[@]} > 0 )) && printf "\n%s\n" "# Crontab of section [Crontab]"
   for k in "${!cron[@]}"; do
     key="$k" cronstr="${cron[$k]}"
-    [[ -z "$cronstr" ]] && continue
-    bk_cmd_crontab_gen_line "$cronstr"
+    [[ -z "${cronstr// /}" ]] && continue
+    bk_cmd_crontab_gen_line "$cronstr" "Crontab" "$key"
   done
 }
 
 bk_cmd_crontab_gen_line() {
-  local line="$1" minute= hour= monthday= month= weekday= command=
-  shift
-  local cmd=() argtasks=("$@") tasks=() targ=
-  local firstarg="${argtasks[0]-}"; firstarg="${firstarg//[[:space:]]/}"
+  local line="$1" section="$2" key="${3:-}"
+  local minute= hour= monthday= month= weekday= command=
+  local cmd=() tasks=() targ= tall=false
 
   # parse line to ensure it has at least 5
   IFS=' ' read -r minute hour monthday month weekday cmdtasks <<<"$line"
+
+  # Supports the main cron field formats:
+  # * — any
+  # */n — step
+  # n,m,... — list
+  # n-m and n-m/n — range with optional step
+  fn_validate_cron_field "$minute"   0 59 || { printf "%s\n" "invalid minute: $minute";   exit 1; }
+  fn_validate_cron_field "$hour"     0 23 || { printf "%s\n" "invalid hour: $hour";       exit 1; }
+  fn_validate_cron_field "$monthday" 1 31 || { printf "%s\n" "invalid monthday: $monthday"; exit 1; }
+  fn_validate_cron_field "$month"    1 12 || { printf "%s\n" "invalid month: $month";     exit 1; }
+  fn_validate_cron_field "$weekday"  0  7 || { printf "%s\n" "invalid weekday: $weekday"; exit 1; }
 
   # generate command
   cmd+=("$SCRIPT_DIR/$SCRIPT_NAME" "-c" "$BK_CONFIG")
@@ -71,23 +81,35 @@ bk_cmd_crontab_gen_line() {
   [[ -n "$F_DEBUG" ]] && cmd+=("-d")
 
   # now set the tasks to be run
-  if [[ "${firstarg}" == "-a" ]] || [[ "${cmdtasks// /}" == "-a" ]]; then
-    cmd+=("-a")
-  else
-    #read tasks passed as argument
-    for targ in "${argtasks[@]}"; do
-      IFS=' ,' read -r -a arr <<< "${targ:-}"
-      (( ${#arr[@]} > 0 )) && tasks+=("${arr[@]}")
-    done
+  if [[ -z "${cmdtasks// /}" ]]; then
+    case "${section,,}" in
+      "general") cmdtasks="-a";;
+      "crontab") cmdtasks="${key:--a}";;
+      *) cmdtasks="$section";;
+    esac
+  fi
+  IFS=' ,' read -r -a arr <<< "${cmdtasks:-}"
+  for task in "${arr[@]}"; do
+    [[ -z "${task// /}" ]] && continue
+    case "$task" in
+      -a)
+        tall=true
+        array_add_unique cmd "-a"
+        ;;
+      -*)
+        array_add_unique cmd "$task"
+        ;;
+      *)
+        array_add_unique tasks "$task"
+        ;;
+    esac
+  done
 
-    # read tasks in the command line
-    IFS=' ,' read -r -a arr <<< "${cmdtasks:-}"
-    (( ${#arr[@]} > 0 )) && tasks+=("${arr[@]}")
-
+  if ! $tall; then
     if (( ${#tasks[@]} == 0 )); then
-      printf "\n%s\n" "################################################"
+      printf "%s\n"   "# ############################################# #"
       printf "%s\n"   "# There is not task defined and it's necessary #"
-      printf "%s\n"   "################################################"
+      printf "%s\n"   "# ############################################# #"
       exit 1
     fi
     cmd+=("${tasks[@]}")
@@ -96,10 +118,32 @@ bk_cmd_crontab_gen_line() {
   # rediredt output
   local output='>>/proc/1/fd/1 2>>/proc/1/fd/2'
 
+  if [[ -n "${key// /}" ]]; then
+    printf "%s\n" "# Crontab of $key"
+  fi
   # now print to sdout
   printf '%s\t%s\t%s\t%s\t%s\t' \
     "${minute:-*}" "${hour:-*}" "${monthday:-*}" "${month:-*}" "${weekday:-*}"
   printf '%q ' "${cmd[@]}"
   printf '%s ' "$output"
   printf '\n'
+}
+
+
+fn_validate_cron_field() {
+  local value="$1" min="$2" max="$3"
+  # allow * and */n and n-m and n,m combinations
+  [[ "$value" =~ ^\*(/[0-9]+)?$ ]] && return 0
+  [[ "$value" =~ ^[0-9]+(,[0-9]+)*$ ]] && {
+    for n in ${value//,/ }; do
+      (( n < min || n > max )) && return 1
+    done
+    return 0
+  }
+  [[ "$value" =~ ^[0-9]+-[0-9]+(/[0-9]+)?$ ]] && {
+    local lo="${value%-*}" hi="${value%/*}"; hi="${hi#*-}"
+    (( lo < min || hi > max || lo > hi )) && return 1
+    return 0
+  }
+  return 1
 }

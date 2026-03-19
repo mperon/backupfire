@@ -466,6 +466,16 @@ fn_in_array() {
   return 1
 }
 
+# array_add_unique: Add a value to an array only if not already present
+# Usage: my_array=("foo" "bar"); array_add_unique my_array "baz"
+array_add_unique() {
+  local -n _arr="$1"
+  local value="$2"
+  for item in "${_arr[@]}"; do
+    [[ "$item" == "$value" ]] && return
+  done
+  _arr+=("$value")
+}
 
 # stat_bytes: print apparent file size in bytes (follows symlinks).
 # Usage: stat_bytes PATH
